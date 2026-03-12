@@ -1,0 +1,76 @@
+{
+  "env": {
+    "ENABLE_LSP_TOOL": "1"
+  },
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "deny": [
+      "Read ~/.env*",
+      "Read **/.env*",
+      "Read **/secrets*",
+      "Edit ~/.bashrc",
+      "Edit ~/.zshrc"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=$(cat | jq -r '.tool_input.file_path // .tool_input.path // empty'); if [ -n \"$FILE\" ] && [ -f \"$FILE\" ]; then EXT=\"${FILE##*.}\"; DIR=$(dirname \"$FILE\"); BIOME=''; while [ \"$DIR\" != '/' ]; do if [ -f \"$DIR/biome.json\" ] || [ -f \"$DIR/biome.jsonc\" ]; then BIOME=\"$DIR\"; break; fi; DIR=$(dirname \"$DIR\"); done; if [ -n \"$BIOME\" ]; then pnpm exec biome format --write \"$FILE\" 2>/dev/null; else case \"$EXT\" in js|jsx|ts|tsx|json|css|md) npx prettier --write \"$FILE\" 2>/dev/null ;; py) black --quiet \"$FILE\" 2>/dev/null ;; esac; fi; fi; exit 0"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "COMMAND=$(cat | jq -r '.tool_input.command'); if echo \"$COMMAND\" | grep -qE 'rm\\s+-rf\\s+/|git\\s+push.*--force|git\\s+push.*-f'; then echo \"Blocked: destructive command detected. Use trash or non-force alternatives.\" >&2; exit 2; else exit 0; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Review the conversation so far. Has the agent completed ALL acceptance criteria from the task? Did it run verification tests? Did it check for anti-Goodhart issues (tests validating behavior not just output)? If any of these are incomplete, respond with {\"decision\": \"block\", \"reason\": \"Incomplete: [what's missing]\"}. If all done, respond with {\"decision\": \"allow\"}.",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Claude needs attention\" with title \"Claude Code\"' 2>/dev/null || notify-send 'Claude Code' 'Claude needs attention' 2>/dev/null; exit 0"
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "playwright@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": true,
+    "security-guidance@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "effortLevel": "high"
+}

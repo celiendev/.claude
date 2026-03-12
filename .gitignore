@@ -1,0 +1,35 @@
+# Exclude sensitive content
+*.env
+*.secret
+.credentials.json
+
+# Exclude Claude's internal state files
+.state/
+projects/
+backups/
+cache/
+paste-cache/
+file-history/
+debug/
+history.jsonl
+downloads/
+
+# Exclude transient worktree directories
+worktrees/
+
+# Exclude machine-specific local settings
+settings.local.json
+
+# Exclude todoStorage and other ephemeral files
+todoStorage.json
+*.log
+
+# Exclude Claude internal state
+security_warnings_state_*
+plans/
+plugins/
+shell-snapshots/
+tasks/
+telemetry/
+todos/
+usage-data/
