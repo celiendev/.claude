@@ -192,9 +192,16 @@ When the user selects **"Auto-start fresh context"**:
 
 ---
 
-## Phase 2: Parallel Batch Execution with Worktrees
+## Phase 2: Execution — Route by Task Type
 
-Execute task batches in order. Follow the **Parallel Execution with Worktrees** protocol from CLAUDE.md.
+Execute task batches in order. The execution strategy depends on whether a task file contains Sprint decomposition or is a simple task.
+
+### Step 2.0: Classify Each Task
+
+Read each task file and determine its type:
+
+- **PRD+Sprint task** — Has `## Sprint Decomposition` or `### Sprint [N]:` sections with multiple sprints → delegate to **orchestrator agent**
+- **Simple task** — Standard checklist of `- [ ]` items without sprint structure → execute with **general-purpose agent**
 
 ### Step 2.1: For Each Batch in the Queue
 
@@ -203,22 +210,55 @@ Execute task batches in order. Follow the **Parallel Execution with Worktrees** 
 1. Read all task files in this batch to get their current state
 2. Update the session learnings file — mark batch as in-progress
 
-#### Case A: Single-Task Batch (no worktree needed)
+#### Route A: PRD+Sprint Task → Orchestrator Agent
 
+Delegate to the **orchestrator** custom agent (`~/.claude/agents/orchestrator.md`):
+
+```
+Agent(description: "Execute PRD sprints", prompt: "...", subagent_type: "general-purpose", model: "opus")
+```
+
+The orchestrator prompt must include:
+
+- The PRD file path
+- Project CLAUDE.md path (for Execution Config and Context Routing Table)
+- Session learnings relevant rules
+
+**What the orchestrator does internally:**
+
+1. Reads the PRD, identifies the first incomplete sprint
+2. For each sprint: delegates to **sprint-executor** agent (`~/.claude/agents/sprint-executor.md`)
+   - sprint-executor runs in **isolated worktree** (`isolation: worktree`)
+   - sprint-executor receives: sprint spec, relevant context, previous sprint's Agent Notes
+   - sprint-executor implements the sprint, runs verification, returns structured summary
+3. After each sprint: orchestrator updates the PRD execution log, runs coherence check
+4. Optionally delegates to **code-reviewer** agent (`~/.claude/agents/code-reviewer.md`) for quality check
+5. Returns completion report to plan-build-test
+
+**Why orchestrator + sprint-executor instead of generic agents:**
+
+- **orchestrator** ensures coherence BETWEEN sprints (e.g., Sprint 3 code consistent with Sprint 1 patterns)
+- **sprint-executor** runs in isolated worktree with own context (no pollution from other sprints)
+- **code-reviewer** catches issues the executor might miss (read-only, can't be tempted to "quick fix")
+
+#### Route B: Simple Task → General-Purpose Agent
+
+For tasks without sprint decomposition, spawn directly:
+
+**Single-task batch (no worktree needed):**
 Spawn a **general-purpose agent** (`model: [assigned]`) with the task prompt (see Step 2.2).
 
-#### Case B: Multi-Task Batch (parallel with worktrees)
-
+**Multi-task batch (parallel with worktrees):**
 Spawn **all agents simultaneously in a single message** using `isolation: "worktree"`:
 
 ```
-Task(subagent_type: "general-purpose", model: "sonnet", isolation: "worktree", prompt: "...task1...")
-Task(subagent_type: "general-purpose", model: "haiku", isolation: "worktree", prompt: "...task2...")
+Agent(model: "sonnet", isolation: "worktree", prompt: "...task1...")
+Agent(model: "haiku", isolation: "worktree", prompt: "...task2...")
 ```
 
 **Worktree agent rules:** Isolated branch from HEAD, cannot see other agents' changes, must NOT modify the session learnings file or install dependencies.
 
-### Step 2.2: Task Agent Prompt Template
+### Step 2.2: Simple Task Agent Prompt Template
 
 > You are a Task Executor. Your job is to complete all pending items in the task file:
 > `[FULL_PATH_TO_TASK_FILE]`
@@ -252,7 +292,6 @@ Task(subagent_type: "general-purpose", model: "haiku", isolation: "worktree", pr
 > - Run the kill command from Execution Config before starting dev servers or tests
 > - Follow mobile-first order for UI changes
 > - Zero console errors in final result
-> - Add concise comments to any non-obvious logic you write (explain WHY, not WHAT)
 >
 > **Learnings from previous tasks in this session:**
 > [PASTE RELEVANT RULES FROM SESSION LEARNINGS FILE HERE]
