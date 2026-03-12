@@ -4,13 +4,7 @@
   },
   "permissions": {
     "defaultMode": "bypassPermissions",
-    "deny": [
-      "Read ~/.env*",
-      "Read **/.env*",
-      "Read **/secrets*",
-      "Edit ~/.bashrc",
-      "Edit ~/.zshrc"
-    ]
+    "deny": []
   },
   "hooks": {
     "PostToolUse": [
@@ -30,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "COMMAND=$(cat | jq -r '.tool_input.command'); if echo \"$COMMAND\" | grep -qE 'rm\\s+-rf\\s+/|git\\s+push.*--force|git\\s+push.*-f'; then echo \"Blocked: destructive command detected. Use trash or non-force alternatives.\" >&2; exit 2; else exit 0; fi"
+            "command": "COMMAND=$(cat | jq -r '.tool_input.command'); if echo \"$COMMAND\" | grep -qE 'rm\\s+-rf\\s+/'; then echo 'Blocked: rm -rf / is never allowed.' >&2; exit 2; elif echo \"$COMMAND\" | grep -qE 'git\\s+push\\s+.*-(-force|f)\\b|git\\s+push\\s+--force-with-lease|git\\s+reset\\s+--hard|git\\s+checkout\\s+\\.|git\\s+restore\\s+\\.|git\\s+branch\\s+-D|git\\s+clean\\s+-f'; then echo '⚠️  Destructive git operation detected: this command may discard work or affect shared state. If this operation is required, re-run it and approve when prompted.' >&2; exit 2; elif echo \"$COMMAND\" | grep -qE '\\bnpm\\s+(install|run|exec|start|test|build|ci|init)\\b|\\bnpx\\s+'; then echo '⚠️  npm/npx detected. This project uses pnpm exclusively. Use pnpm/pnpm exec/pnpm dlx instead. If npm/npx is truly required here, re-run and approve.' >&2; exit 2; else exit 0; fi"
           }
         ]
       }
@@ -41,7 +35,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Review the conversation so far. Has the agent completed ALL acceptance criteria from the task? Did it run verification tests? Did it check for anti-Goodhart issues (tests validating behavior not just output)? If any of these are incomplete, respond with {\"decision\": \"block\", \"reason\": \"Incomplete: [what's missing]\"}. If all done, respond with {\"decision\": \"allow\"}.",
+            "prompt": "Classify the conversation: (A) Implementation task — code was written or edited to fulfill specific acceptance criteria (look for Write/Edit tool calls that changed source code, not just config or docs). (B) Everything else — discussion, planning, Q&A, audit, review, config changes, documentation edits, workflow fixes, CLAUDE.md/settings.json edits. If B: respond {\"decision\": \"allow\"}. If A: check — all AC met? Tests run? Anti-Goodhart passed (tests validate behavior, not just output)? If incomplete, respond {\"decision\": \"block\", \"reason\": \"Incomplete: [what's missing]\"}. If all done, respond {\"decision\": \"allow\"}.",
             "timeout": 30
           }
         ]

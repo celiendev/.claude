@@ -2,8 +2,9 @@
 name: compound
 description: >
   Post-task learning capture and knowledge promotion. Auto-invoke when a task
-  or sprint is completed, when the user says "done", "finished", "ship it",
-  "wrap up", or when all acceptance criteria are checked off.
+  or sprint is completed, when the user says "done", "finished", "wrap up",
+  or when all acceptance criteria are checked off. Do NOT invoke when user
+  says "ship it" — that triggers /ship-test-ensure instead.
 ---
 
 # Compound: Learning Capture & Knowledge Promotion

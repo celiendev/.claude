@@ -26,8 +26,10 @@ todoStorage.json
 
 # Exclude Claude internal state
 security_warnings_state_*
+mcp-needs-auth-cache.json
 plans/
 plugins/
+session-env/
 shell-snapshots/
 tasks/
 telemetry/

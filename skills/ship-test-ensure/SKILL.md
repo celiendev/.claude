@@ -80,6 +80,8 @@ app_detection_paths:
     paths: ["apps/app2/", "packages/shared/"]
 ```
 
+The format above is illustrative (YAML-like). The actual project CLAUDE.md may use markdown tables, key-value pairs, or other formats. Parse whatever format is present — the keys and values matter, not the syntax.
+
 If `## Execution Config` is missing from the project CLAUDE.md, **STOP** and ask the user to add it before proceeding.
 
 ---
@@ -171,6 +173,8 @@ EOF
 Commit message should accurately describe all changes. Use conventional commit types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`.
 
 ### Step 1.2: Push to Main
+
+> **Note:** This skill intentionally pushes directly to main (no PR). Staging auto-deploys on push to main, and the skill must test the live deployed app. Quality is gated by Phase 0.3 local verification and prior `/plan-build-test` execution.
 
 ```bash
 git push origin main
@@ -491,15 +495,7 @@ Some audits may be impossible to fix to 100 (e.g., third-party scripts, CDN late
 
 ---
 
-## Compact Recovery Protocol
-
-If `/compact` is called:
-
-1. Re-read the session learnings file — look for `## Ship Pipeline State`
-2. Resume from the last completed phase
-3. Do NOT restart from Phase 0 — pick up where you left off
-4. If mid-deploy-monitoring, re-check the run status
-5. If mid-PageSpeed-iteration, re-run the audit on remaining pages
+Follow the **Compact Recovery Protocol** from CLAUDE.md. For this skill specifically: look for `## Ship Pipeline State` in session learnings to determine resume point.
 
 ---
 

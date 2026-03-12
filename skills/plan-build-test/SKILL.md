@@ -12,7 +12,7 @@ description: >
 
 # Plan, Build & Test — Local Development Workflow
 
-Plan, implement, and test features entirely locally: discover tasks, simplify, plan, implement with agent teams, run all tests and E2E locally, then learn. No commits, no deploys, no staging — that's what `/ship-test-ensure` is for after you've manually verified.
+Plan, implement, and test features entirely locally: discover tasks, plan, implement with agent teams, run all tests and E2E locally, then learn. No commits, no deploys, no staging — that's what `/ship-test-ensure` is for after you've manually verified.
 
 Operate as a **Team Lead** coordinating specialist agents — using parallel worktrees for independent tasks and sequential execution for dependent ones.
 
@@ -21,7 +21,7 @@ Operate as a **Team Lead** coordinating specialist agents — using parallel wor
 - Context Engineering — orchestrator pattern, subagent communication, context budget
 - Model Assignment Matrix — haiku/sonnet/opus per task type
 - Parallel Execution with Worktrees — batch planning, isolation, merge protocol
-- Session Learnings — compact-safe memory at the path specified in project CLAUDE.md
+- Compact Recovery Protocol — re-read session learnings, resume from last phase
 - Self-Improvement Protocol — compile, persist, generate rules
 
 **Inherited from project knowledge files** (applies to all phases below):
@@ -31,35 +31,21 @@ Operate as a **Team Lead** coordinating specialist agents — using parallel wor
 
 ---
 
-## Project Configuration Contract
+## Project Configuration
 
-This skill reads project-specific commands and paths from the project's `CLAUDE.md` file. The project MUST define an `## Execution Config` section (or equivalent) containing:
+This skill reads project-specific commands from the project's `CLAUDE.md` under `## Execution Config`. Required keys: `build`, `test`, `lint`, `lint-fix`, `type-check`, `e2e`, `dev`, `kill`, plus `session-learnings-path`, `task-file-location`, and `knowledge-files`.
 
-| Key                      | Purpose                          | Example                                                   |
-| ------------------------ | -------------------------------- | --------------------------------------------------------- |
-| `build`                  | Build all packages/apps          | `pnpm turbo build`, `npm run build`, `make build`         |
-| `test`                   | Run unit/integration tests       | `pnpm turbo test`, `npm test`, `cargo test`               |
-| `lint`                   | Run linter/formatter check       | `pnpm exec biome check .`, `npm run lint`, `cargo clippy` |
-| `lint-fix`               | Auto-fix lint/format issues      | `pnpm exec biome check --write .`, `npm run lint:fix`     |
-| `type-check`             | Run type checker                 | `pnpm turbo check-types`, `tsc --noEmit`                  |
-| `e2e`                    | Run E2E tests                    | `pnpm exec playwright test`, `npm run e2e`, `cypress run` |
-| `dev`                    | Start dev server                 | `pnpm turbo dev`, `npm run dev`, `cargo run`              |
-| `kill`                   | Kill running dev/test processes  | `pkill -f "next-server"`, `killall node`                  |
-| `session-learnings-path` | Path to session learnings file   | `/path/to/session-learnings.md`                           |
-| `task-file-location`     | Where task files live            | `docs/tasks/<app>/<category>/YYYY-MM-DD_HHmm-name.md`     |
-| `knowledge-files`        | Project knowledge/patterns files | `patterns.md`, `MEMORY.md`                                |
-
-If the project CLAUDE.md does not define explicit commands, infer them from the project's `package.json`, `Makefile`, `Cargo.toml`, or equivalent build configuration. Always confirm with the user before executing inferred commands.
+If the project CLAUDE.md does not define explicit commands, infer them from `package.json`, `Makefile`, or equivalent. Confirm with the user before executing inferred commands.
 
 ---
 
-## PHASE 0: RESUME GATE (Always Runs First)
+## Phase 0: Resume Gate (Always Runs First)
 
-**This phase determines where to start. It prevents the loop of re-discovery when a plan already exists.**
+**Prevents re-discovery when a plan already exists.**
 
 ### Step 0.1: Read Session Learnings
 
-Read the session learnings file from the path specified in the project's CLAUDE.md. Check for:
+Read the session learnings file (path from project CLAUDE.md). Check for:
 
 - `## Active Task Queue` — already-planned batches with task files
 - `## Parallel Batch Plan` — batch structure (parallel/sequential, models, dependencies)
@@ -70,8 +56,8 @@ Read the session learnings file from the path specified in the project's CLAUDE.
 
 | Session Learnings State                                         | Action                                                                                                           |
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| **Has Active Task Queue with NOT STARTED or IN PROGRESS tasks** | **SKIP to Phase 2** (Execution). The plan exists. Do NOT re-discover. Do NOT re-ask the user for execution mode. |
-| **Has Active Task Queue but ALL tasks are COMPLETE**            | Go to Phase 5 (Learning) if compound wasn't done, otherwise tell user all tasks are complete.                    |
+| **Has Active Task Queue with NOT STARTED or IN PROGRESS tasks** | **SKIP to Phase 3** (Execution). The plan exists. Do NOT re-discover. Do NOT re-ask the user for execution mode. |
+| **Has Active Task Queue but ALL tasks are COMPLETE**            | Go to Phase 6 (Learning) if compound wasn't done, otherwise tell user all tasks are complete.                    |
 | **No Active Task Queue OR file doesn't exist**                  | Go to Phase 1 (Discovery) — this is a fresh start.                                                               |
 | **User explicitly described a NEW task** (not in any task file) | Go to Phase 1 (Discovery) to scan existing tasks AND create a new task file for the user's request.              |
 
@@ -107,9 +93,9 @@ Based on the discovery agent's results, determine the work queue:
 
 ---
 
-## Phase 1.5: Dependency Analysis & Parallel Batch Planning
+## Phase 2: Batch Planning (Dependency Analysis)
 
-### Step 1.5.1: Analyze Task Independence
+### Step 2.1: Analyze Task Independence
 
 Spawn a **general-purpose agent** (`model: "haiku"`) to analyze dependencies using the **Batch Planning** rules from CLAUDE.md:
 
@@ -142,7 +128,7 @@ Spawn a **general-purpose agent** (`model: "haiku"`) to analyze dependencies usi
 >
 > When in doubt, mark tasks as DEPENDENT.
 
-### Step 1.5.2: Assign Models to Tasks
+### Step 2.2: Assign Models to Tasks
 
 For each task, determine complexity and assign a model per the CLAUDE.md Model Assignment Matrix:
 
@@ -150,7 +136,7 @@ For each task, determine complexity and assign a model per the CLAUDE.md Model A
 - **Standard** (feature implementation, bug fixes, test writing, scoped multi-file): `sonnet`
 - **Complex** (architectural changes, cross-cutting refactors, 5+ files): `opus`
 
-### Step 1.5.3: Present Execution Plan to User
+### Step 2.3: Present Execution Plan to User
 
 Display the discovered queue with parallel batches, then ask:
 
@@ -192,18 +178,18 @@ When the user selects **"Auto-start fresh context"**:
 
 ---
 
-## Phase 2: Execution — Route by Task Type
+## Phase 3: Execution — Route by Task Type
 
 Execute task batches in order. The execution strategy depends on whether a task file contains Sprint decomposition or is a simple task.
 
-### Step 2.0: Classify Each Task
+### Step 3.0: Classify Each Task
 
 Read each task file and determine its type:
 
 - **PRD+Sprint task** — Has `## Sprint Decomposition` or `### Sprint [N]:` sections with multiple sprints → delegate to **orchestrator agent**
 - **Simple task** — Standard checklist of `- [ ]` items without sprint structure → execute with **general-purpose agent**
 
-### Step 2.1: For Each Batch in the Queue
+### Step 3.1: For Each Batch in the Queue
 
 **Before spawning agents:**
 
@@ -212,41 +198,29 @@ Read each task file and determine its type:
 
 #### Route A: PRD+Sprint Task → Orchestrator Agent
 
-Delegate to the **orchestrator** custom agent (`~/.claude/agents/orchestrator.md`):
+Delegate to the **orchestrator** custom agent (`~/.claude/agents/orchestrator.md`). The orchestrator manages sprint lifecycle, delegation, coherence checks, and parallel sprint execution — behaviors a generic agent lacks.
+
+The agent prompt MUST start with: "Read and follow the orchestrator protocol at `~/.claude/agents/orchestrator.md`." This ensures the agent inherits the orchestrator's delegation rules, coherence checks, and parallel sprint execution logic.
 
 ```
-Agent(description: "Execute PRD sprints", prompt: "...", subagent_type: "general-purpose", model: "opus")
+Agent(description: "Execute PRD sprints",
+      prompt: "Read and follow the orchestrator protocol at ~/.claude/agents/orchestrator.md.\n\n[PRD path, Execution Config, session learnings rules]",
+      subagent_type: "general-purpose",
+      model: "opus")
 ```
 
-The orchestrator prompt must include:
+The orchestrator prompt must also include:
 
 - The PRD file path
 - Project CLAUDE.md path (for Execution Config and Context Routing Table)
 - Session learnings relevant rules
-
-**What the orchestrator does internally:**
-
-1. Reads the PRD, identifies the first incomplete sprint
-2. For each sprint: delegates to **sprint-executor** agent (`~/.claude/agents/sprint-executor.md`)
-   - sprint-executor runs in **isolated worktree** (`isolation: worktree`)
-   - sprint-executor receives: sprint spec, relevant context, previous sprint's Agent Notes
-   - sprint-executor implements the sprint, runs verification, returns structured summary
-3. After each sprint: orchestrator updates the PRD execution log, runs coherence check
-4. Optionally delegates to **code-reviewer** agent (`~/.claude/agents/code-reviewer.md`) for quality check
-5. Returns completion report to plan-build-test
-
-**Why orchestrator + sprint-executor instead of generic agents:**
-
-- **orchestrator** ensures coherence BETWEEN sprints (e.g., Sprint 3 code consistent with Sprint 1 patterns)
-- **sprint-executor** runs in isolated worktree with own context (no pollution from other sprints)
-- **code-reviewer** catches issues the executor might miss (read-only, can't be tempted to "quick fix")
 
 #### Route B: Simple Task → General-Purpose Agent
 
 For tasks without sprint decomposition, spawn directly:
 
 **Single-task batch (no worktree needed):**
-Spawn a **general-purpose agent** (`model: [assigned]`) with the task prompt (see Step 2.2).
+Spawn a **general-purpose agent** (`model: [assigned]`) with the task prompt (see Step 3.2).
 
 **Multi-task batch (parallel with worktrees):**
 Spawn **all agents simultaneously in a single message** using `isolation: "worktree"`:
@@ -258,7 +232,7 @@ Agent(model: "haiku", isolation: "worktree", prompt: "...task2...")
 
 **Worktree agent rules:** Isolated branch from HEAD, cannot see other agents' changes, must NOT modify the session learnings file or install dependencies.
 
-### Step 2.2: Simple Task Agent Prompt Template
+### Step 3.2: Simple Task Agent Prompt Template
 
 > You are a Task Executor. Your job is to complete all pending items in the task file:
 > `[FULL_PATH_TO_TASK_FILE]`
@@ -299,7 +273,7 @@ Agent(model: "haiku", isolation: "worktree", prompt: "...task2...")
 > **Known patterns (from project knowledge files):**
 > [PASTE RELEVANT PATTERNS FROM PROJECT KNOWLEDGE FILES]
 
-### Step 2.3: Post-Batch Merge
+### Step 3.3: Post-Batch Merge
 
 Follow the **Merge Protocol** from CLAUDE.md. Then:
 
@@ -307,7 +281,7 @@ Follow the **Merge Protocol** from CLAUDE.md. Then:
 2. Update the session learnings file (completed tasks, merge log, errors, agent performance)
 3. **Feed forward:** Extract rules from the session learnings file to include in the NEXT batch's agent prompts
 
-### Step 2.4: Inter-Batch Learning Loop
+### Step 3.4: Inter-Batch Learning Loop
 
 Before spawning the next batch:
 
@@ -319,17 +293,17 @@ This creates a **batch learning chain**: Batch 1's mistakes become Batch 2's rul
 
 ---
 
-## Phase 2.5: Post-Implementation Simplification
+## Phase 4: Post-Implementation Simplification
 
-After all batches complete (and merge, if parallel), invoke the `/simplify` skill to review the changed code for reuse, quality, and efficiency. Fix any issues it finds before proceeding to verification.
+After all batches complete (and merge, if parallel), use the **code-simplifier** plugin to review the changed code for reuse, quality, and efficiency. Fix any issues it finds before proceeding to verification.
 
 ---
 
-## Phase 3: Local Verification
+## Phase 5: Local Verification
 
 After ALL batches are processed:
 
-### Step 3.1: Spawn Verification Agent
+### Step 5.1: Spawn Verification Agent
 
 Spawn a **general-purpose agent** (`model: "sonnet"`) for comprehensive verification:
 
@@ -355,23 +329,17 @@ Spawn a **general-purpose agent** (`model: "sonnet"`) for comprehensive verifica
 >
 > Return a structured report: pass/fail per command, E2E results, task file audit results, regression findings.
 
-### Step 3.2: Handle Local Verification Failures
+### Step 5.2: Handle Local Verification Failures
 
 1. Log failures in the session learnings file
 2. Assign fix agent model per CLAUDE.md matrix (lint -> haiku, build -> sonnet, logic -> opus)
 3. Spawn fix agents sequentially, re-verify, repeat until clean
 
-### Step 3.3: Visual Verification (if UI changes were made)
+### Step 5.3: Visual Verification (if UI changes were made)
 
 If the project has a visual verification skill or browser-based testing workflow, invoke it for Playwright/browser verification and user confirmation. Otherwise, instruct the user to manually verify UI changes via the dev server.
 
-### Step 3.4: Code Simplification (Optional — Run First on Large Tasks)
-
-Before implementing new features on complex codebases, simplify the affected code first. Simpler code = fewer bugs, easier maintenance, easier to read.
-
-Invoke the `/simplify` skill. It will review the changed/affected code for reuse, quality, and efficiency, then fix any issues found automatically.
-
-### Step 3.5: Dev Server Smoke Test
+### Step 5.4: Dev Server Smoke Test
 
 Start the dev server using the commands from Execution Config:
 
@@ -380,17 +348,17 @@ Start the dev server using the commands from Execution Config:
 
 Check for console errors, hydration mismatches, and runtime exceptions. This is the user's signal that the code is ready for manual testing.
 
-**After Phase 3 completes, tell the user:**
+**After Phase 5 completes, tell the user:**
 
 > "All local verification passed. The dev server is running — test the features manually. When you're satisfied, run `/ship-test-ensure` to commit, deploy, and verify in production."
 
 ---
 
-## Phase 5: Learning & Self-Improvement
+## Phase 6: Learning & Self-Improvement
 
 Follow the **Self-Improvement Protocol** from CLAUDE.md, plus:
 
-### Step 5.1: Persist New Knowledge
+### Step 6.1: Persist New Knowledge
 
 For every issue encountered during the session — especially things that:
 
@@ -404,7 +372,7 @@ For every issue encountered during the session — especially things that:
 - What the actual solution was
 - A rule to follow next time
 
-### Step 5.2: Session Report
+### Step 6.2: Session Report
 
 ```
 ## Build Complete
@@ -445,20 +413,6 @@ For every issue encountered during the session — especially things that:
 ### Next Step
 Run `/ship-test-ensure` when ready to deploy.
 ```
-
----
-
-## Compact Recovery Protocol
-
-If `/compact` is called at any point:
-
-1. **Immediately re-read** the session learnings file — queue, batches, errors, rules, progress, merge log
-2. **Re-read** project knowledge files — accumulated knowledge and troubleshooting patterns
-3. Read the task file(s) currently in-progress (from `## Active Task Queue`)
-4. Check `## Parallel Batch Plan` and `## Worktree Merge Log` for batch state
-5. **Resume from where you left off** — do NOT restart from Phase 1
-6. If a parallel batch was interrupted, re-run only incomplete agents
-7. If a merge was interrupted, continue from the merge log
 
 ---
 

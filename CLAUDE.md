@@ -92,7 +92,14 @@ Only after Step 3 does execution begin. Quick Fix skips this.
 **Location:** `docs/tasks/<area>/<category>/YYYY-MM-DD_HHmm-descriptive-name.md`
 **Categories:** `feature`, `bugfix`, `refactor`, `infrastructure`, `security`, `documentation`
 
-#### Correctness Discovery (mandatory before any PRD)
+#### Correctness Discovery (scaled by mode)
+
+**Standard mode (2 questions):**
+
+1. **Audience:** Who uses this output and what decision will they make?
+2. **Verification:** How would you check if the output is correct?
+
+**PRD+Sprint mode (full 6 questions):**
 
 1. **Audience:** Who uses this output and what decision will they make?
 2. **Failure Definition:** What would make this output useless?
@@ -101,7 +108,7 @@ Only after Step 3 does execution begin. Quick Fix skips this.
 5. **Risk Tolerance:** Confident wrong answer or refusal — which is worse?
 6. **Verification:** How would you check if the output is correct?
 
-PRD templates (Minimal and Full) live in `~/.claude/skills/plan/` alongside the planning skill.
+Full framework with examples: `~/.claude/skills/plan/correctness-discovery.md`. PRD templates: `~/.claude/skills/plan/`.
 
 ### Sprint System
 
@@ -117,25 +124,18 @@ Large PRDs decompose into Sprints — self-contained units for one agent in a he
 
 Sprint execution is delegated to the `sprint-executor` agent (`~/.claude/agents/sprint-executor.md`). The orchestrator manages lifecycle and coherence.
 
-### The Full Pipeline: Plan → Build+Test → Ship+Verify → Compound
+### The Full Pipeline
 
-These four skills form a complete end-to-end workflow. Each is auto-invoked or manually triggered:
+Three skills form the end-to-end workflow:
 
 ```
-User describes task
-      │
-      ▼
-[/plan] — Classify mode, Contract-First, PRD, Sprint decomposition
-      │
-      ▼ (user says "build it" / "execute")
-[/plan-build-test] — Discover tasks, batch plan, parallel worktree execution, local verification
-      │
-      ▼ (user manually tests, says "ship it")
-[/ship-test-ensure] — Commit, push, staging deploy, staging E2E, production deploy, Lighthouse 100/100
-      │
-      ▼ (auto-invokes on completion)
-[/compound] — Learning capture, knowledge promotion, session-learnings update
+[/plan] — PRD generation only. Use when you ONLY want to plan without executing.
+[/plan-build-test] — Smart entry point: discovers pending tasks, plans if needed, executes, verifies locally.
+[/ship-test-ensure] — Deploy pipeline: commit, staging, E2E, production, Lighthouse 100/100.
+[/compound] — Post-task learning capture. Auto-runs after completion (not after "ship it").
 ```
+
+`/plan-build-test` can plan on its own — `/plan` is optional for when you want a PRD without execution.
 
 **Project-specific commands** (build, test, lint, deploy, URLs, pages to audit) live in each project's CLAUDE.md under `## Execution Config`. Skills read from there — never hardcode project details.
 
@@ -228,7 +228,14 @@ Stay in scope. Resist "one more thing."
 
 ### Deterministic Safety via Hooks
 
-The "Agent NEVER does" column is enforced as PreToolUse hooks in `~/.claude/settings.json`, not just prompt suggestions. PostToolUse hooks auto-format after edits. Stop hooks enforce Anti-Goodhart verification. These are hard rules the agent cannot bypass.
+The "Agent NEVER does" column is enforced as PreToolUse hooks in `~/.claude/settings.json`, not just prompt suggestions. PostToolUse hooks auto-format after edits. Stop hooks enforce Anti-Goodhart verification.
+
+- **Hard block** (always denied): `rm -rf /`
+- **Soft block** (warns and asks user for confirmation):
+  - Destructive git: `git push --force`, `git push -f`, `git push --force-with-lease`, `git reset --hard`, `git checkout .`, `git restore .`, `git branch -D`, `git clean -f`
+  - Forbidden package managers: `npm install/run/exec/start/test/build/ci/init`, `npx` — project uses pnpm exclusively
+
+Soft blocks exit 2 with a descriptive message — the user can re-approve if the operation is genuinely required.
 
 ---
 
@@ -244,46 +251,7 @@ LLMs are non-deterministic. The most reliable pattern combines:
 
 Default iteration budget: 3 retries per task. What tests cannot catch: security heuristics, architectural implications, complex layer interactions — human review is the judgment layer.
 
-### Stack Evaluation Checklist
-
-| Layer     | Question                                                                          | Pass? |
-| --------- | --------------------------------------------------------------------------------- | ----- |
-| Prompt    | Did output match what was asked? Format, scope, constraints followed?             | [ ]   |
-| Context   | Were all relevant docs read?                                                      | [ ]   |
-| Intent    | Were tradeoffs resolved per Value Hierarchy?                                      | [ ]   |
-| Judgment  | Were uncertainties documented? Assumptions flagged correctly?                     | [ ]   |
-| Coherence | Does implementation follow existing patterns/ADRs? Consistent with previous work? | [ ]   |
-
-### Diagnostic Loop
-
-When output is unsatisfactory, diagnose WHICH layer failed:
-
-1. Wrong format/scope/constraints? → **Prompt** issue
-2. Missing/wrong information? → **Context** issue
-3. Wrong tradeoffs? → **Intent** issue
-4. Charged ahead on uncertain ground? → **Judgment** issue
-5. Inconsistent with previous work? → **Coherence** issue
-
-Re-enter at the failing layer. Often the fix is adding context or clarifying intent, not changing the prompt.
-
-### Spec Self-Evaluator (run before executing any PRD)
-
-- [ ] Problem stated before solution?
-- [ ] Audience explicitly named?
-- [ ] Success metrics quantitative and binary-testable?
-- [ ] Failure modes enumerated?
-- [ ] Danger modes enumerated?
-- [ ] Non-goals at least as detailed as goals?
-- [ ] All constraints explicit?
-- [ ] Uncertainty policy stated?
-- [ ] Tradeoff preferences stated?
-- [ ] Verification steps described?
-- [ ] All vague terms have measurable translations?
-- [ ] No references to tacit knowledge without providing it?
-- [ ] Abstraction level appropriate for task size?
-- [ ] Could a different agent execute this unambiguously?
-
-**Scoring:** 11-14 pass = ready. 7-10 = revise weak areas. Below 7 = fundamental rethink.
+Full evaluation checklists (Stack Evaluation, Diagnostic Loop, Spec Self-Evaluator) live in `~/.claude/docs/evaluation-reference.md`. Load when needed for PRD review or post-sprint verification.
 
 ---
 
@@ -410,6 +378,17 @@ For multi-task workflows, maintain a session learnings file as **living memory**
 
 ---
 
+## COMPACT RECOVERY PROTOCOL
+
+When `/compact` is called or context is refreshed mid-task:
+
+1. Re-read the session learnings file (path from project CLAUDE.md)
+2. Re-read project knowledge files (patterns, MEMORY.md)
+3. Resume from the last completed phase — do NOT restart
+4. If mid-deploy or mid-monitoring, re-check current status before continuing
+
+---
+
 ## SELF-IMPROVEMENT PROTOCOL
 
 ### Per-Task Compound (every task)
@@ -437,23 +416,7 @@ Before closing any task:
 
 ---
 
-## ANTI-PATTERNS (Quick Reference)
-
-**Specification:**
-
-- **Kitchen Sink** — Everything in one massive spec. Fix: right-size to task.
-- **Aspirational** — "Make it better." Fix: translate to measurable behavior.
-- **Solution Spec** — Prescribing HOW not WHAT. Fix: separate functional from technical.
-- **Assumption** — "Follow our patterns" without saying which. Fix: provide the pattern or path.
-- **No-Boundary** — Goals without non-goals. Fix: non-goals as detailed as goals.
-
-**Workflow:**
-
-- **Mode Rigidity** — One mode regardless of task. Fix: switch freely.
-- **Review Complacency** — Less critical as volume grows. Fix: rigor scales with risk.
-- **False Sense of Control** — Templates guarantee compliance. Fix: trust but verify.
-- **Spec-as-Bureaucracy** — Full PRD for a one-line fix. Fix: match ceremony to complexity.
-- **No Feedback Loops** — Not tracking failures. Fix: log, find patterns, update templates.
+Anti-patterns reference: `~/.claude/docs/anti-patterns-full.md`. Key rule: match ceremony to complexity.
 
 ---
 
@@ -465,6 +428,7 @@ Before closing any task:
 - **Commits:** Atomic. Format: `<type>: <what changed>`
 - **Types:** `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`
 - **Never force-push to main.** Always create PRs for non-trivial changes.
+- **Exception:** `/ship-test-ensure` pushes directly to main (no PR) because staging auto-deploys on push to main and the skill needs to test the deployed app. Local verification gate (Phase 0.3) + prior `/plan-build-test` execution serve as quality checks.
 - **Before committing:** Run linter to catch lint/format issues.
 
 ### Security Checklist

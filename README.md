@@ -27,12 +27,14 @@ specialized agents, skills (auto-invoked and manual), and reference docs.
   - `sprint-executor.md` — Sprint implementation (isolated worktree)
   - `code-reviewer.md` — Read-only review agent
 - `skills/` — Auto-invocable skills with supporting files
-  - `plan/` — Task classification and PRD generation (auto-invoked)
-  - `check-and-fix/` — Bug fixing with judgment protocols (auto-invoked)
+  - `plan/` — PRD generation only (auto-invoked)
+  - `plan-build-test/` — Discover, plan, execute, verify locally (auto-invoked)
+  - `ship-test-ensure/` — Deploy pipeline: staging, E2E, production, Lighthouse (auto-invoked)
   - `compound/` — Post-task learning capture (auto-invoked)
 - `docs/` — Standalone reference material
-  - `vague-requirements-translator.md` — Vague to measurable requirement translations
+  - `evaluation-reference.md` — Stack Evaluation, Diagnostic Loop, Spec Self-Evaluator
   - `anti-patterns-full.md` — Expanded anti-patterns with examples and fixes
+  - `vague-requirements-translator.md` — Vague to measurable requirement translations
 
 ## Based On
 
