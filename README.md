@@ -134,6 +134,3 @@ Detailed documentation lives in [`workflow/`](workflow/):
 ### Reference
 - [Design Principles](workflow/14-design-principles.md) — 10 recurring principles that guide the entire system
 - [Glossary](workflow/15-glossary.md) — Terms and definitions
-
-### Full Documentation PDF
-- [Mastering Claude Workflow — Complete Guide](workflow/mastering-claude-workflow-complete-guide.pdf) — The full documentation used in this project, compiled as a single PDF reference
