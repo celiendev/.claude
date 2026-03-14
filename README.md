@@ -14,15 +14,20 @@ This system is primarily shaped by hands-on experience building production softw
 
 ## Quick Start
 
+> **CAUTION:** This system installs to `~/.claude/`, which is the **user-level** configuration directory for Claude Code. Cloning this repository will **replace your existing personal configuration** — including your `CLAUDE.md`, `settings.json`, hooks, and any other customizations you've made. This is NOT a per-project setup; it affects **every project** you open with Claude Code. Back up your existing `~/.claude/` directory before proceeding.
+
 ```bash
-# 1. Clone to ~/.claude/
+# 1. Back up your existing configuration (important!)
+cp -r ~/.claude ~/.claude.backup 2>/dev/null
+
+# 2. Clone to ~/.claude/
 git clone <repository-url> ~/.claude
 
-# 2. Open any project with Claude Code
+# 3. Open any project with Claude Code
 cd /path/to/your/project
 claude
 
-# 3. That's it — the system loads automatically
+# 4. That's it — the system loads automatically
 ```
 
 Hooks enforce rules deterministically, agents handle complex work, and skills auto-invoke based on what you're doing. Project-specific context goes in each project's own `CLAUDE.md` (see [Getting Started](workflow/02-getting-started.md)).

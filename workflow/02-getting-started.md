@@ -9,11 +9,21 @@
 
 ## Installation
 
-### Step 1: Clone the Repository
+> **CAUTION — User-Level Configuration Override**
+>
+> This system installs to `~/.claude/`, which is the **user-level** configuration directory for Claude Code. This means:
+>
+> - It **replaces your entire personal configuration** — `CLAUDE.md`, `settings.json`, hooks, and all other files in `~/.claude/`
+> - It is **NOT per-project** — it applies globally to **every project** you open with Claude Code
+> - Any existing personal customizations (custom hooks, settings, memory files, evolution data) **will be overwritten**
+>
+> **Always back up your existing `~/.claude/` directory before installing.** If you have custom configurations you want to preserve, review the backup after installation and merge them manually into the new system.
+
+### Step 1: Back Up and Clone the Repository
 
 ```bash
-# If ~/.claude/ already exists, back it up first
-mv ~/.claude ~/.claude.backup 2>/dev/null
+# Back up your existing configuration (do NOT skip this)
+cp -r ~/.claude ~/.claude.backup 2>/dev/null
 
 # Clone the workflow system
 git clone <repository-url> ~/.claude
