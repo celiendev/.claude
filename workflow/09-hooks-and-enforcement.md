@@ -38,9 +38,15 @@ While `CLAUDE.md` provides guidelines the model "should" follow, `settings.json`
 │  └──────────────────┘                                               │
 │                                                                     │
 │  ┌──────────────────┐                                               │
+│  │  PreToolUse      │ ◄── Runs BEFORE every Write/Edit/MultiEdit    │
+│  │  (Write|Edit|    │     check-test-exists.sh: TDD gate            │
+│  │   MultiEdit)     │     (blocks edit if no test file exists)       │
+│  └──────────────────┘                                               │
+│                                                                     │
+│  ┌──────────────────┐                                               │
 │  │  PostToolUse     │ ◄── Runs AFTER every Write/Edit/MultiEdit     │
 │  │  (Write|Edit|    │     post-edit-quality.sh: auto-format TS/JS   │
-│  │   MultiEdit)     │     (Biome → ESLint+Prettier → skip)          │
+│  │   MultiEdit)     │     check-invariants.sh: verify INVARIANTS.md │
 │  └──────────────────┘                                               │
 │                                                                     │
 │  ┌──────────────────┐                                               │
@@ -48,6 +54,8 @@ While `CLAUDE.md` provides guidelines the model "should" follow, `settings.json`
 │  │  (always)        │     end-of-turn-typecheck.sh: check TS types  │
 │  │                  │     compound-reminder.sh: BLOCK if compound   │
 │  │                  │     hasn't run after task completion           │
+│  │                  │     verify-completion.sh: BLOCK if task marked │
+│  │                  │     complete without evidence marker           │
 │  └──────────────────┘                                               │
 │                                                                     │
 │  ┌──────────────────┐                                               │
@@ -69,9 +77,12 @@ While `CLAUDE.md` provides guidelines the model "should" follow, `settings.json`
 |---|---|---|---|---|
 | `block-dangerous.sh` | PreToolUse(Bash) | Every shell command | Block destructive operations | Hard/soft block |
 | `proot-preflight.sh` | PreToolUse(Bash) | First command/session | Warn about proot issues | No (informational) |
+| `check-test-exists.sh` | PreToolUse(Write/Edit) | Every file edit | TDD gate — require test file | Yes (exit 2 if missing) |
 | `post-edit-quality.sh` | PostToolUse(Write/Edit) | Every file edit | Auto-format TS/JS | Yes (exit 2 on lint errors) |
+| `check-invariants.sh` | PostToolUse(Write/Edit) | Every file edit | Verify INVARIANTS.md rules | Yes (exit 2 on violation) |
 | `end-of-turn-typecheck.sh` | Stop | End of turn | Type-check TypeScript | Yes (exit 2 on type errors) |
 | `compound-reminder.sh` | Stop | End of turn | Ensure /compound ran | Yes (exit 2 if skipped) |
+| `verify-completion.sh` | Stop | End of turn | Block premature completion | Yes (exit 2 without evidence) |
 | `worktree-preflight.sh` | (orchestrator) | Sprint start | Git/env readiness | N/A (utility) |
 | `retry-with-backoff.sh` | (utility) | API calls | Exponential backoff | N/A (utility) |
 
@@ -236,6 +247,141 @@ To add a new hook, add an entry to the relevant section in `settings.json`:
 ```
 
 Exit codes: `0` = allow, `1` = error, `2` = block with message (stderr).
+
+## PreToolUse: check-test-exists.sh
+
+Runs **before** every Write, Edit, or MultiEdit on production code files. Enforces TDD — you must write the test file before editing the implementation.
+
+```
+File about to be edited
+    │
+    ▼
+Is it a code file? (.ts/.tsx/.js/.jsx) ─── No ──► allow
+    │
+   Yes
+    │
+    ▼
+Is it skip-listed? ──── Yes ──► allow
+(test files, config files, index.ts,
+ types.ts, .d.ts, migrations, etc.)
+    │
+   No
+    │
+    ▼
+Does project have test infrastructure? ─── No ──► allow
+(vitest.config, jest.config, etc.)
+    │
+   Yes
+    │
+    ▼
+Does a matching test file exist? ─── Yes ──► allow
+(__tests__/name.test.ts, name.test.ts,
+ name.spec.ts, tests/name.test.ts)
+    │
+   No
+    │
+    ▼
+BLOCK (exit 2): "Write the test first"
+```
+
+**Why this matters:** TDD is mandatory. Without this hook, agents write implementation first and tests as an afterthought — leading to tests that validate output rather than behavior.
+
+## PostToolUse: check-invariants.sh
+
+Runs **after** every Write, Edit, or MultiEdit on code files. Validates all INVARIANTS.md rules by executing their `Verify` commands.
+
+```
+File was edited
+    │
+    ▼
+Is it a code file? ─── No ──► skip
+    │
+   Yes
+    │
+    ▼
+Walk up from file dir to project root,
+collecting all INVARIANTS.md files
+    │
+    ├─ None found ──► skip
+    │
+    └─ Found ──► for each invariant:
+                  extract Verify command
+                  run command (cd to project root)
+                  │
+                  ├─ All pass ──► allow
+                  └─ Any fail ──► BLOCK (exit 2)
+                     Report which invariant failed
+                     and the Fix instruction
+```
+
+**Why this matters:** INVARIANTS.md defines cross-cutting contracts (permission string formats, entity statuses, API conventions). Without enforcement, agents independently invent incompatible vocabularies — tests pass locally but integration breaks.
+
+## Stop Hook: verify-completion.sh
+
+**BLOCKING** hook that prevents the agent from claiming task completion without evidence:
+
+```
+Agent wants to stop
+    │
+    ▼
+stop_hook_active? ─── Yes ──► allow (prevents infinite loop)
+    │
+   No
+    │
+    ▼
+Any progress.json with "complete" sprints
+modified in last 24h? ─── No ──► allow
+    │
+   Yes
+    │
+    ▼
+Evidence marker file exists?
+(/tmp/.claude-completion-evidence-$SESSION_ID)
+    │
+    ├─ No ──► BLOCK (exit 2)
+    │         "Task marked complete but no verification evidence.
+    │          Run the Anti-Premature Completion Checklist."
+    │
+    └─ Yes ──► Check required fields:
+               plan_reread, acceptance_criteria_cited,
+               dev_server_verified, non_privileged_user_tested
+               │
+               ├─ All present ──► allow
+               └─ Missing ──► BLOCK (exit 2)
+                  "Evidence marker incomplete: missing [field]"
+```
+
+**Why this matters:** This is the enforcement mechanism for the Anti-Premature Completion Protocol. Without it, the protocol is just instructions the model can ignore.
+
+## Workflow Integrity Tests
+
+The system includes a self-test suite at `~/.claude/test-workflow-mods/` that validates the entire `~/.claude/` structure.
+
+**What it tests (112 assertions across 14 sections):**
+
+| Section | What It Validates |
+|---|---|
+| Hook scripts | All 9 executable hooks + 1 sourced utility exist with +x |
+| TDD enforcement | 8 behavioral tests (allow/block based on test file presence) |
+| Invariant verification | 5 behavioral tests (allow/block based on INVARIANTS.md rules) |
+| Anti-premature completion | 5 behavioral tests (evidence marker handling) |
+| settings.json registration | Every hook registered to correct lifecycle event |
+| settings.json cross-reference | Every registered hook command points to existing file |
+| CLAUDE.md documentation | 18 key concepts documented |
+| Agent definitions | 3 agents with correct frontmatter, model, and behavioral checks |
+| Skill definitions | 5 skills with SKILL.md and frontmatter |
+| Plan skill | Build Candidate, INVARIANTS.md, support files |
+| PRD template | Structure and section numbering |
+| Sprint spec template | Consumed Invariants section |
+| Evolution infrastructure | JSON validity, backups, directory structure |
+| Compound self-test | Compound skill references test suite |
+
+**When it runs:** Automatically as Step 10 of `/compound` when any `~/.claude/` file was modified. This ensures workflow modifications don't silently break the system.
+
+**To run manually:**
+```bash
+bash ~/.claude/test-workflow-mods/run-tests.sh
+```
 
 ---
 

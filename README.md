@@ -58,9 +58,15 @@ The core loop. Plan + Review = 80% of effort. Work + Compound = 20%. The bottlen
 │   └── workflow-audit/    # Periodic system self-review
 ├── hooks/             # Safety enforcement scripts
 │   ├── block-dangerous.sh     # Blocks rm -rf, force push, npm
+│   ├── check-test-exists.sh   # TDD gate — blocks edits without test file
+│   ├── check-invariants.sh    # Verifies INVARIANTS.md rules after edits
 │   ├── post-edit-quality.sh   # Auto-formats TS/JS after every edit
 │   ├── end-of-turn-typecheck.sh # Type-checks before session end
-│   └── compound-reminder.sh   # Blocks session end without learning capture
+│   ├── compound-reminder.sh   # Blocks session end without learning capture
+│   └── verify-completion.sh   # Blocks premature completion claims
+├── test-workflow-mods/# Workflow integrity test suite (112 assertions)
+│   ├── run-tests.sh           # Validates entire ~/.claude/ structure
+│   └── testdata/              # Fixture projects for hook behavioral tests
 ├── docs/              # Reference material (loaded on demand, not every session)
 │   ├── evaluation-reference.md
 │   ├── anti-patterns-full.md
@@ -100,9 +106,16 @@ The system uses deterministic hooks — real code that runs before/after every a
 | Hook | Trigger | What It Does |
 |---|---|---|
 | `block-dangerous.sh` | Every Bash command | Blocks `rm -rf /`, force push, npm |
+| `check-test-exists.sh` | Every file edit | TDD gate — blocks production code edits without test file |
+| `check-invariants.sh` | Every file edit | Verifies INVARIANTS.md rules after edits |
 | `post-edit-quality.sh` | Every file edit | Auto-formats TS/JS (Biome or ESLint) |
 | `end-of-turn-typecheck.sh` | Session end | Type-checks TypeScript |
 | `compound-reminder.sh` | Session end | Blocks exit without learning capture |
+| `verify-completion.sh` | Session end | Blocks premature completion without evidence |
+
+### Workflow Integrity Tests
+
+The system includes a self-test suite (`test-workflow-mods/run-tests.sh`) with 112 assertions that validates the entire `~/.claude/` structure: hook existence and executability, settings.json registration and cross-references, CLAUDE.md documentation coverage, agent/skill structure, and evolution infrastructure. Runs automatically as the final step of `/compound` whenever workflow files are modified.
 
 ## Full Documentation
 
