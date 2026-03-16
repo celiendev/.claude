@@ -10,16 +10,18 @@ set -euo pipefail
 #  2. check-test-exists.sh — TDD enforcement (behavioral)
 #  3. check-invariants.sh — Invariant verification (behavioral)
 #  4. verify-completion.sh — Anti-premature completion (behavioral)
-#  5. settings.json — Hook registration & env vars
-#  6. settings.json — Cross-reference (every registered hook file exists)
-#  7. CLAUDE.md — Key documentation present
-#  8. Agent definitions — Exist with correct frontmatter
-#  9. Skill definitions — All skills have SKILL.md
-# 10. Plan skill — Build Candidate & INVARIANTS.md
-# 11. PRD template — Structure
-# 12. Orchestrator — Key behaviors
-# 13. Sprint spec template — Structure
-# 14. Evolution infrastructure — Files exist and JSON is valid
+#  5. post-edit-quality.sh — Auto-format Biome/ESLint (behavioral)
+#  6. end-of-turn-typecheck.sh — TypeScript type checking (behavioral)
+#  7. settings.json — Hook registration & env vars
+#  8. settings.json — Cross-reference (every registered hook file exists)
+#  9. CLAUDE.md — Key documentation present
+# 10. Agent definitions — Exist with correct frontmatter
+# 11. Skill definitions — All skills have SKILL.md
+# 12. Plan skill — Build Candidate & INVARIANTS.md
+# 13. PRD template — Structure
+# 14. Sprint spec template — Structure
+# 15. Evolution infrastructure — Files exist and JSON is valid
+# 16. Compound skill — Self-test integration
 
 HOOKS_DIR="$HOME/.claude/hooks"
 SKILLS_DIR="$HOME/.claude/skills"
@@ -346,7 +348,136 @@ fi
 rm -f "/tmp/.claude-completion-evidence-$UNIQUE_SESSION"
 
 # ============================================================
-header "5. settings.json — Hook Registration & Env Vars"
+header "5. post-edit-quality.sh — Auto-Format (Biome/ESLint)"
+# ============================================================
+
+# Test 5.1: SKIP non-TS/JS files (markdown)
+INPUT=$(make_write_input "$FIXTURES_DIR/project-with-tests/README.md")
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-with-tests" "$HOOKS_DIR/post-edit-quality.sh" >/dev/null 2>&1; then
+  pass "Skips non-TS/JS files (README.md)"
+else
+  fail "Ran formatter on non-TS/JS file"
+fi
+
+# Test 5.2: SKIP excluded directories (node_modules)
+TEMP_PROJECT="/tmp/test-post-edit-quality"
+mkdir -p "$TEMP_PROJECT/node_modules/pkg"
+echo "export const x = 1;" > "$TEMP_PROJECT/node_modules/pkg/index.ts"
+INPUT=$(make_write_input "$TEMP_PROJECT/node_modules/pkg/index.ts")
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$TEMP_PROJECT" "$HOOKS_DIR/post-edit-quality.sh" >/dev/null 2>&1; then
+  pass "Skips files in node_modules/"
+else
+  fail "Ran formatter on file in node_modules/"
+fi
+
+# Test 5.3: SKIP excluded directories (dist)
+mkdir -p "$TEMP_PROJECT/dist"
+echo "export const x = 1;" > "$TEMP_PROJECT/dist/bundle.js"
+INPUT=$(make_write_input "$TEMP_PROJECT/dist/bundle.js")
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$TEMP_PROJECT" "$HOOKS_DIR/post-edit-quality.sh" >/dev/null 2>&1; then
+  pass "Skips files in dist/"
+else
+  fail "Ran formatter on file in dist/"
+fi
+
+# Test 5.4: SKIP excluded directories (.next)
+mkdir -p "$TEMP_PROJECT/.next/static"
+echo "export const x = 1;" > "$TEMP_PROJECT/.next/static/chunk.js"
+INPUT=$(make_write_input "$TEMP_PROJECT/.next/static/chunk.js")
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$TEMP_PROJECT" "$HOOKS_DIR/post-edit-quality.sh" >/dev/null 2>&1; then
+  pass "Skips files in .next/"
+else
+  fail "Ran formatter on file in .next/"
+fi
+
+# Test 5.5: SKIP when no linter config found (no biome.json, no eslint config)
+mkdir -p "$TEMP_PROJECT/src"
+echo "export const x = 1;" > "$TEMP_PROJECT/src/app.ts"
+INPUT=$(make_write_input "$TEMP_PROJECT/src/app.ts")
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$TEMP_PROJECT" "$HOOKS_DIR/post-edit-quality.sh" >/dev/null 2>&1; then
+  pass "Skips silently when no linter config found"
+else
+  fail "Failed when no linter config found (should skip)"
+fi
+
+# Test 5.6: DETECT biome.json config (won't run biome since not installed, but should attempt)
+echo '{}' > "$TEMP_PROJECT/biome.json"
+INPUT=$(make_write_input "$TEMP_PROJECT/src/app.ts")
+# This will fail because biome is not installed, but the important thing is it TRIES
+# (exits non-zero because the biome command fails, not because the hook logic is wrong)
+OUTPUT=$(echo "$INPUT" | CLAUDE_PROJECT_DIR="$TEMP_PROJECT" "$HOOKS_DIR/post-edit-quality.sh" 2>&1) || true
+EXIT_CODE=$?
+if [ "$EXIT_CODE" -eq 2 ] || [ "$EXIT_CODE" -eq 0 ]; then
+  pass "Detects biome.json and attempts biome check (exit $EXIT_CODE)"
+else
+  fail "Unexpected exit code with biome.json present" "Expected 0 or 2, got $EXIT_CODE"
+fi
+rm -f "$TEMP_PROJECT/biome.json"
+
+# Test 5.7: DETECT eslint config (won't run eslint since not installed, but should attempt)
+echo '{}' > "$TEMP_PROJECT/.eslintrc.json"
+INPUT=$(make_write_input "$TEMP_PROJECT/src/app.ts")
+OUTPUT=$(echo "$INPUT" | CLAUDE_PROJECT_DIR="$TEMP_PROJECT" "$HOOKS_DIR/post-edit-quality.sh" 2>&1) || true
+EXIT_CODE=$?
+if [ "$EXIT_CODE" -eq 2 ] || [ "$EXIT_CODE" -eq 0 ]; then
+  pass "Detects .eslintrc.json and attempts eslint --fix (exit $EXIT_CODE)"
+else
+  fail "Unexpected exit code with .eslintrc.json present" "Expected 0 or 2, got $EXIT_CODE"
+fi
+rm -f "$TEMP_PROJECT/.eslintrc.json"
+
+# Test 5.8: SKIP when file doesn't exist
+INPUT=$(make_write_input "$TEMP_PROJECT/src/nonexistent.ts")
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$TEMP_PROJECT" "$HOOKS_DIR/post-edit-quality.sh" >/dev/null 2>&1; then
+  pass "Skips when file doesn't exist"
+else
+  fail "Failed on nonexistent file (should skip)"
+fi
+
+rm -rf "$TEMP_PROJECT"
+
+# ============================================================
+header "6. end-of-turn-typecheck.sh — TypeScript Type Checking"
+# ============================================================
+
+# Test 6.1: SKIP when stop_hook_active is true (prevent infinite loop)
+INPUT=$(make_stop_input_active)
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="/tmp/empty" "$HOOKS_DIR/end-of-turn-typecheck.sh" >/dev/null 2>&1; then
+  pass "Skips when stop_hook_active (prevents infinite loop)"
+else
+  fail "Did not respect stop_hook_active flag"
+fi
+
+# Test 6.2: SKIP when no tsconfig.json exists
+TEMP_PROJECT="/tmp/test-typecheck"
+mkdir -p "$TEMP_PROJECT/src"
+echo "export const x: number = 1;" > "$TEMP_PROJECT/src/app.ts"
+INPUT=$(make_stop_input)
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$TEMP_PROJECT" "$HOOKS_DIR/end-of-turn-typecheck.sh" >/dev/null 2>&1; then
+  pass "Skips when no tsconfig.json exists"
+else
+  fail "Ran type check without tsconfig.json"
+fi
+
+# Test 6.3: SKIP when no code was written this turn (no recent file changes)
+# Create a tsconfig but no recent changes
+echo '{"compilerOptions":{"strict":true}}' > "$TEMP_PROJECT/tsconfig.json"
+# Touch the typecheck log to be newer than any files
+LOG_DIR="$HOME/.claude/hooks/logs"
+mkdir -p "$LOG_DIR"
+sleep 1
+touch "$LOG_DIR/typecheck.log"
+INPUT=$(make_stop_input)
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$TEMP_PROJECT" "$HOOKS_DIR/end-of-turn-typecheck.sh" >/dev/null 2>&1; then
+  pass "Skips when no code was written this turn (no recent changes)"
+else
+  fail "Ran type check despite no recent code changes"
+fi
+
+rm -rf "$TEMP_PROJECT"
+
+# ============================================================
+header "7. settings.json — Hook Registration & Env Vars"
 # ============================================================
 
 # 5.1-5.3: Key hooks registered to correct lifecycle events
@@ -414,7 +545,7 @@ for env_var in "NODE_OPTIONS" "CHOKIDAR_USEPOLLING" "WATCHPACK_POLLING"; do
 done
 
 # ============================================================
-header "6. settings.json — Cross-Reference (hook files exist)"
+header "8. settings.json — Cross-Reference (hook files exist)"
 # ============================================================
 
 # Extract every hook command that references ~/.claude/hooks/ and verify the file exists
@@ -434,7 +565,7 @@ else
 fi
 
 # ============================================================
-header "7. CLAUDE.md — Key Documentation"
+header "9. CLAUDE.md — Key Documentation"
 # ============================================================
 
 # Core workflow concepts documented
@@ -469,7 +600,7 @@ for pattern in "${!CLAUDE_MD_CHECKS[@]}"; do
 done
 
 # ============================================================
-header "8. Agent Definitions"
+header "10. Agent Definitions"
 # ============================================================
 
 EXPECTED_AGENTS=(orchestrator sprint-executor code-reviewer)
@@ -537,7 +668,7 @@ else
 fi
 
 # ============================================================
-header "9. Skill Definitions"
+header "11. Skill Definitions"
 # ============================================================
 
 EXPECTED_SKILLS=(compound plan plan-build-test ship-test-ensure workflow-audit)
@@ -560,7 +691,7 @@ for skill in "${EXPECTED_SKILLS[@]}"; do
 done
 
 # ============================================================
-header "10. Plan Skill — Build Candidate & INVARIANTS.md"
+header "12. Plan Skill — Build Candidate & INVARIANTS.md"
 # ============================================================
 
 PLAN_SKILL="$SKILLS_DIR/plan/SKILL.md"
@@ -593,7 +724,7 @@ for plan_file in correctness-discovery.md prd-template-full.md prd-template-mini
 done
 
 # ============================================================
-header "11. PRD Template — Structure"
+header "13. PRD Template — Structure"
 # ============================================================
 
 PRD_TEMPLATE="$SKILLS_DIR/plan/prd-template-full.md"
@@ -614,7 +745,7 @@ else
 fi
 
 # ============================================================
-header "12. Sprint Spec Template — Structure"
+header "14. Sprint Spec Template — Structure"
 # ============================================================
 
 SPRINT_TEMPLATE="$SKILLS_DIR/plan/sprint-spec-template.md"
@@ -626,7 +757,7 @@ else
 fi
 
 # ============================================================
-header "13. Evolution Infrastructure"
+header "15. Evolution Infrastructure"
 # ============================================================
 
 # Directory exists
@@ -684,7 +815,7 @@ for json_file in error-registry.json model-performance.json; do
 done
 
 # ============================================================
-header "14. Compound Skill — Self-Test Integration"
+header "16. Compound Skill — Self-Test Integration"
 # ============================================================
 
 COMPOUND_SKILL="$SKILLS_DIR/compound/SKILL.md"

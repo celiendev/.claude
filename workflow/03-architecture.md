@@ -43,7 +43,7 @@
 │   └── retry-with-backoff.sh           # Utility for API rate limit handling
 │
 ├── test-workflow-mods/                 # Workflow integrity test suite
-│   ├── run-tests.sh                    # 112 assertions validating ~/.claude/ structure
+│   ├── run-tests.sh                    # 123 assertions validating ~/.claude/ structure
 │   └── testdata/                       # Fixture projects for hook behavioral tests
 │
 ├── docs/                               # Reference material (loaded on demand)

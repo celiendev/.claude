@@ -357,7 +357,7 @@ Evidence marker file exists?
 
 The system includes a self-test suite at `~/.claude/test-workflow-mods/` that validates the entire `~/.claude/` structure.
 
-**What it tests (112 assertions across 14 sections):**
+**What it tests (123 assertions across 16 sections):**
 
 | Section | What It Validates |
 |---|---|
@@ -365,6 +365,8 @@ The system includes a self-test suite at `~/.claude/test-workflow-mods/` that va
 | TDD enforcement | 8 behavioral tests (allow/block based on test file presence) |
 | Invariant verification | 5 behavioral tests (allow/block based on INVARIANTS.md rules) |
 | Anti-premature completion | 5 behavioral tests (evidence marker handling) |
+| Auto-format (Biome/ESLint) | 8 behavioral tests (skip non-TS, skip excluded dirs, detect configs) |
+| TypeScript type checking | 3 behavioral tests (skip conditions, tsconfig detection) |
 | settings.json registration | Every hook registered to correct lifecycle event |
 | settings.json cross-reference | Every registered hook command points to existing file |
 | CLAUDE.md documentation | 18 key concepts documented |
