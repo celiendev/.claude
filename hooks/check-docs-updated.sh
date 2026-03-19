@@ -7,28 +7,32 @@
 
 set -euo pipefail
 
-# When called as a hook, $1 is the tool input JSON. Detect if this is a push command.
-if [ -n "${1:-}" ]; then
-  # Check if this is a git push command
-  COMMAND="$1"
-  if ! echo "$COMMAND" | grep -qE 'git\s+push'; then
-    exit 0  # Not a push — skip
-  fi
+# Read JSON input from stdin (same pattern as block-dangerous.sh)
+INPUT=$(cat)
+if [[ "$INPUT" =~ \"command\":\"(([^\"\\]|\\.)*)\" ]]; then
+  COMMAND="${BASH_REMATCH[1]}"
+  COMMAND="${COMMAND//\\\"/\"}"
+  COMMAND="${COMMAND//\\\\/\\}"
+else
+  # Standalone invocation — treat $1 as base branch
+  COMMAND="${1:-git push}"
 fi
 
-# Must be in the ~/.claude repo
-REPO_ROOT="$(git -C ~/.claude rev-parse --show-toplevel 2>/dev/null || true)"
-if [ -z "$REPO_ROOT" ] || [ "$REPO_ROOT" != "$(cd ~/.claude && pwd)" ]; then
+# Only run on git push commands
+if ! echo "$COMMAND" | grep -qE 'git\s+push'; then
+  exit 0  # Not a push — skip
+fi
+
+# Must be pushing FROM the ~/.claude repo (not some other project)
+CWD_REPO="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+CLAUDE_DIR="$(cd ~/.claude && pwd)"
+if [ -z "$CWD_REPO" ] || [ "$CWD_REPO" != "$CLAUDE_DIR" ]; then
   exit 0  # Not in the workflow repo
 fi
 
-cd "$REPO_ROOT"
+cd "$CWD_REPO"
 
-BASE_BRANCH="${1:-main}"
-# If called as hook, base branch is always main
-if echo "${1:-}" | grep -q 'git'; then
-  BASE_BRANCH="main"
-fi
+BASE_BRANCH="main"
 
 # Get files changed compared to base branch (or HEAD~1 if on main)
 if [ "$(git branch --show-current)" = "$BASE_BRANCH" ]; then

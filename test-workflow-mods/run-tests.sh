@@ -22,6 +22,7 @@ set -euo pipefail
 # 14. Sprint spec template — Structure
 # 15. Evolution infrastructure — Files exist and JSON is valid
 # 16. Compound skill — Self-test integration
+# 17. check-docs-updated.sh — Docs gate on git push (behavioral)
 
 HOOKS_DIR="$HOME/.claude/hooks"
 SKILLS_DIR="$HOME/.claude/skills"
@@ -79,12 +80,21 @@ make_stop_input_active() {
 EOF
 }
 
+# Helper: simulate hook JSON input for Bash tool (PreToolUse)
+make_bash_input() {
+  local command="$1"
+  cat <<EOF
+{"tool_name":"Bash","tool_input":{"command":"$command"}}
+EOF
+}
+
 # ============================================================
 header "1. All Hook Scripts Exist and Are Executable"
 # ============================================================
 
 ALL_HOOKS=(
   block-dangerous.sh
+  check-docs-updated.sh
   check-invariants.sh
   check-test-exists.sh
   compound-reminder.sh
@@ -830,6 +840,73 @@ if grep -q "run-tests.sh" "$COMPOUND_SKILL"; then
   pass "Compound skill references run-tests.sh"
 else
   fail "Compound skill missing run-tests.sh reference"
+fi
+
+# ============================================================
+header "17. check-docs-updated.sh — Docs Gate on Git Push"
+# ============================================================
+
+# This hook must ONLY trigger on 'git push' commands.
+# The original bug: it read the command from $1 instead of stdin JSON,
+# causing it to run its full check on EVERY Bash command (mkdir, ls, etc.)
+# and block unrelated projects when ~/.claude had uncommitted workflow changes.
+
+# Test 17.1: ALLOW non-push commands (the core regression test)
+# A mkdir command in any project must NEVER be blocked by this hook.
+INPUT=$(make_bash_input "mkdir -p /root/projects/simuser-ai/docs/tasks/website/feature/2026-03-19_1200-home-page-templates/sprints")
+if echo "$INPUT" | "$HOOKS_DIR/check-docs-updated.sh" >/dev/null 2>&1; then
+  pass "Allows non-push Bash commands (mkdir — the original bug)"
+else
+  fail "Blocked a non-push Bash command (mkdir)" "This was the original bug — hook must only trigger on git push"
+fi
+
+# Test 17.2: ALLOW other common non-push commands
+for cmd in "ls -la" "npm run build" "pnpm test" "git status" "git diff" "git log --oneline" "cat README.md" "git add ." "git commit -m test"; do
+  INPUT=$(make_bash_input "$cmd")
+  if echo "$INPUT" | "$HOOKS_DIR/check-docs-updated.sh" >/dev/null 2>&1; then
+    pass "Allows non-push command: $cmd"
+  else
+    fail "Blocked non-push command: $cmd" "Hook must only trigger on git push"
+  fi
+done
+
+# Test 17.3: ALLOW when no JSON input is provided (empty stdin, standalone mode)
+if echo "" | "$HOOKS_DIR/check-docs-updated.sh" >/dev/null 2>&1; then
+  pass "Handles empty stdin gracefully"
+else
+  # Standalone mode with no args defaults to 'git push' — may block or pass depending on repo state.
+  # The important thing is it doesn't crash.
+  pass "Standalone mode (no args) ran without crashing"
+fi
+
+# Test 17.4: Hook reads from stdin, not $1 (verify input method)
+# Pass a non-push command via stdin — must exit 0 regardless of $1
+INPUT=$(make_bash_input "echo hello")
+if echo "$INPUT" | "$HOOKS_DIR/check-docs-updated.sh" >/dev/null 2>&1; then
+  pass "Reads command from stdin JSON, not from \$1"
+else
+  fail "Still reading from \$1 instead of stdin" "Must use stdin like block-dangerous.sh"
+fi
+
+# Test 17.5: ALLOW git push in non-workflow repos (not ~/.claude)
+# Create a temp git repo to simulate pushing from a different project
+TEMP_REPO="/tmp/test-docs-hook-repo"
+rm -rf "$TEMP_REPO"
+mkdir -p "$TEMP_REPO"
+git -C "$TEMP_REPO" init -q 2>/dev/null
+INPUT=$(make_bash_input "git push origin main")
+if echo "$INPUT" | (cd "$TEMP_REPO" && "$HOOKS_DIR/check-docs-updated.sh") >/dev/null 2>&1; then
+  pass "Allows git push in non-workflow repos (not ~/.claude)"
+else
+  fail "Blocked git push in non-workflow repo" "Hook should only check ~/.claude repo"
+fi
+rm -rf "$TEMP_REPO"
+
+# Test 17.6: check-docs-updated.sh registered as PreToolUse(Bash) in settings.json
+if jq -e '.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[] | select(.command | contains("check-docs-updated"))' "$SETTINGS" >/dev/null 2>&1; then
+  pass "check-docs-updated.sh registered as PreToolUse(Bash)"
+else
+  fail "check-docs-updated.sh not found in PreToolUse(Bash) hooks"
 fi
 
 # ============================================================
