@@ -46,7 +46,19 @@ The core loop. Plan + Review = 80% of effort. Work + Compound = 20%. The bottlen
 The preferred end-to-end workflow minimizes human touchpoints to four: review the plan, approve it, test manually, confirm production deploy. Everything else runs without interruption.
 
 ```
-/plan → User reviews PRD → Approves → /plan-build-test (autonomous) → User tests manually → /ship-test-ensure (autonomous through staging, confirms before prod)
+┌─────────┐    ┌──────────────────┐    ┌──────────────────────┐    ┌───────────┐
+│  /plan   │───►│ User reviews PRD │───►│  /plan-build-test    │───►│ User tests│
+│          │    │ and approves     │    │  (autonomous)        │    │ manually  │
+└─────────┘    └──────────────────┘    └──────────────────────┘    └─────┬─────┘
+                                                                         │
+                ┌──────────────────────────────────────────────────────────┘
+                │
+                ▼
+        ┌───────────────────┐    ┌──────────────────────┐    ┌──────────────┐
+        │ /ship-test-ensure │───►│ MANDATORY: User       │───►│ Production   │
+        │ (autonomous thru  │    │ confirms prod deploy  │    │ + Lighthouse │
+        │  staging)         │    │ (non-negotiable gate) │    │ 100/100      │
+        └───────────────────┘    └──────────────────────┘    └──────────────┘
 ```
 
 **What each step does:**
