@@ -45,20 +45,22 @@ The core loop. Plan + Review = 80% of effort. Work + Compound = 20%. The bottlen
 
 The preferred end-to-end workflow minimizes human touchpoints to four: review the plan, approve it, test manually, confirm production deploy. Everything else runs without interruption.
 
-```
-┌─────────┐    ┌──────────────────┐    ┌──────────────────────┐    ┌───────────┐
-│  /plan   │───►│ User reviews PRD │───►│  /plan-build-test    │───►│ User tests│
-│          │    │ and approves     │    │  (autonomous)        │    │ manually  │
-└─────────┘    └──────────────────┘    └──────────────────────┘    └─────┬─────┘
-                                                                         │
-                ┌──────────────────────────────────────────────────────────┘
-                │
-                ▼
-        ┌───────────────────┐    ┌──────────────────────┐    ┌──────────────┐
-        │ /ship-test-ensure │───►│ MANDATORY: User       │───►│ Production   │
-        │ (autonomous thru  │    │ confirms prod deploy  │    │ + Lighthouse │
-        │  staging)         │    │ (non-negotiable gate) │    │ 100/100      │
-        └───────────────────┘    └──────────────────────┘    └──────────────┘
+```mermaid
+flowchart LR
+    A["/plan"] --> B["User reviews PRD\nand approves"]
+    B --> C["/plan-build-test\n(autonomous)"]
+    C --> D["User tests\nmanually"]
+    D --> E["/ship-test-ensure\n(autonomous thru staging)"]
+    E --> F["🔒 User confirms\nprod deploy"]
+    F --> G["Production\n+ Lighthouse & PageSpeed\n100/100"]
+
+    style A fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style C fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style E fill:#4a90d9,stroke:#2c5f8a,color:#fff
+    style B fill:#f5a623,stroke:#c4841d,color:#fff
+    style D fill:#f5a623,stroke:#c4841d,color:#fff
+    style F fill:#d94a4a,stroke:#a33,color:#fff
+    style G fill:#7ed321,stroke:#5a9e18,color:#fff
 ```
 
 **What each step does:**
