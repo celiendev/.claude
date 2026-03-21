@@ -83,8 +83,8 @@ After shipping, `/compound` auto-captures learnings and promotes patterns — ma
 
 | Skill | What It Does | When to Use |
 |---|---|---|
-| `/plan` | Generates PRD only | "Just plan, don't build yet" |
 | `/create-project` | Greenfield project PRD with discovery interview and architecture defaults | "New project", "start a project", "build me an app" |
+| `/plan` | Generates PRD only | "Just plan, don't build yet" |
 | `/plan-build-test` | Plans, executes with agent teams, verifies locally | "Build this feature / fix this bug" |
 | `/ship-test-ensure` | Branch, PR, staging E2E, production deploy, Lighthouse (optional) | "Ship what I've built" |
 | `/compound` | Captures learnings, updates error registry, evolves system | Auto-invoked after task completion |
