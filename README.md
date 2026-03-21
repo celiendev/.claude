@@ -79,63 +79,12 @@ flowchart LR
 
 After shipping, `/compound` auto-captures learnings and promotes patterns — making the next task easier. That's the compound loop.
 
-## Repository Structure
-
-```
-~/.claude/
-├── CLAUDE.md          # The brain — all rules, workflows, and judgment protocols
-├── settings.json      # Deterministic enforcement via hooks
-├── agents/            # Specialized workers with isolated context windows
-│   ├── orchestrator.md    # Delegates and coordinates — never implements
-│   ├── sprint-executor.md # Implements sprints in isolated worktrees
-│   └── code-reviewer.md   # Read-only auditor — reports, never fixes
-├── skills/            # Auto-invocable step-by-step workflows
-│   ├── plan/              # PRD generation (/plan)
-│   ├── create-project/    # Greenfield project PRD with architecture defaults
-│   ├── plan-build-test/   # Local pipeline: discover → plan → execute → verify
-│   ├── ship-test-ensure/  # Deploy: branch → PR → staging → E2E → production
-│   ├── compound/          # Post-task learning capture
-│   ├── workflow-audit/    # Periodic system self-review
-│   ├── update-docs/       # Analyze code and update project documentation
-│   └── playwright-stealth/# Anti-detection web browsing for own content
-├── hooks/             # Safety enforcement scripts (language-universal)
-│   ├── lib/
-│   │   └── detect-project.sh   # Shared language/project detection (16 languages)
-│   ├── block-dangerous.sh     # Blocks rm -rf, force push, project-aware pkg mgr
-│   ├── check-test-exists.sh   # TDD gate — blocks edits without test file (all langs)
-│   ├── check-invariants.sh    # Verifies INVARIANTS.md rules after edits
-│   ├── post-edit-quality.sh   # Auto-formats code after every edit (all langs)
-│   ├── end-of-turn-typecheck.sh # Static type checking (all langs)
-│   ├── compound-reminder.sh   # Blocks session end without learning capture
-│   ├── verify-completion.sh   # Blocks premature completion claims
-│   ├── validate-i18n-keys.sh  # Cross-validates i18n keys across locales
-│   ├── verify-worktree-merge.sh # Detects silent overwrites in worktree merges
-│   ├── check-docs-updated.sh # Blocks push if workflow changed without doc updates
-│   ├── proot-preflight.sh    # First-command session setup for proot-distro
-│   ├── worktree-preflight.sh # Language-aware worktree dependency setup
-│   ├── retry-with-backoff.sh # Retry helper for external API calls
-│   └── validate-sprint-boundaries.sh # Validates sprint file boundaries
-├── test-workflow-mods/# Workflow integrity test suite (123 assertions)
-│   ├── run-tests.sh           # Validates entire ~/.claude/ structure
-│   └── testdata/              # Fixture projects for hook behavioral tests
-├── docs/              # Reference material (loaded on demand, not every session)
-│   ├── universal-workflow-guide.md  # How to use/extend for any language
-│   ├── evaluation-reference.md
-│   ├── anti-patterns-full.md
-│   ├── verification-gates.md
-│   ├── project-claude-md-template.md
-│   └── vague-requirements-translator.md
-├── workflow/          # Full documentation (you are here)
-└── evolution/         # Cross-project learning data
-    └── session-postmortems/    # Post-session analysis and learnings
-```
-
 ## Skills
 
 | Skill | What It Does | When to Use |
 |---|---|---|
-| `/plan` | Generates PRD only | "Just plan, don't build yet" |
 | `/create-project` | Greenfield project PRD with discovery interview and architecture defaults | "New project", "start a project", "build me an app" |
+| `/plan` | Generates PRD only | "Just plan, don't build yet" |
 | `/plan-build-test` | Plans, executes with agent teams, verifies locally | "Build this feature / fix this bug" |
 | `/ship-test-ensure` | Branch, PR, staging E2E, production deploy, Lighthouse (optional) | "Ship what I've built" |
 | `/compound` | Captures learnings, updates error registry, evolves system | Auto-invoked after task completion |
@@ -182,6 +131,57 @@ TypeScript, JavaScript, Python, Go, Rust, Ruby, Java, Kotlin, Elixir, Swift, Dar
 ### Workflow Integrity Tests
 
 The system includes a self-test suite (`test-workflow-mods/run-tests.sh`) with 123 assertions that validates the entire `~/.claude/` structure: hook existence and executability, settings.json registration and cross-references, CLAUDE.md documentation coverage, agent/skill structure, and evolution infrastructure. Runs automatically as the final step of `/compound` whenever workflow files are modified.
+
+## Repository Structure
+
+```
+~/.claude/
+├── CLAUDE.md          # The brain — all rules, workflows, and judgment protocols
+├── settings.json      # Deterministic enforcement via hooks
+├── agents/            # Specialized workers with isolated context windows
+│   ├── orchestrator.md    # Delegates and coordinates — never implements
+│   ├── sprint-executor.md # Implements sprints in isolated worktrees
+│   └── code-reviewer.md   # Read-only auditor — reports, never fixes
+├── skills/            # Auto-invocable step-by-step workflows
+│   ├── plan/              # PRD generation (/plan)
+│   ├── create-project/    # Greenfield project PRD with architecture defaults
+│   ├── plan-build-test/   # Local pipeline: discover → plan → execute → verify
+│   ├── ship-test-ensure/  # Deploy: branch → PR → staging → E2E → production
+│   ├── compound/          # Post-task learning capture
+│   ├── workflow-audit/    # Periodic system self-review
+│   ├── update-docs/       # Analyze code and update project documentation
+│   └── playwright-stealth/# Anti-detection web browsing for own content
+├── hooks/             # Safety enforcement scripts (language-universal)
+│   ├── lib/
+│   │   └── detect-project.sh   # Shared language/project detection (16 languages)
+│   ├── block-dangerous.sh     # Blocks rm -rf, force push, project-aware pkg mgr
+│   ├── check-test-exists.sh   # TDD gate — blocks edits without test file (all langs)
+│   ├── check-invariants.sh    # Verifies INVARIANTS.md rules after edits
+│   ├── post-edit-quality.sh   # Auto-formats code after every edit (all langs)
+│   ├── end-of-turn-typecheck.sh # Static type checking (all langs)
+│   ├── compound-reminder.sh   # Blocks session end without learning capture
+│   ├── verify-completion.sh   # Blocks premature completion claims
+│   ├── validate-i18n-keys.sh  # Cross-validates i18n keys across locales
+│   ├── verify-worktree-merge.sh # Detects silent overwrites in worktree merges
+│   ├── check-docs-updated.sh # Blocks push if workflow changed without doc updates
+│   ├── proot-preflight.sh    # First-command session setup for proot-distro
+│   ├── worktree-preflight.sh # Language-aware worktree dependency setup
+│   ├── retry-with-backoff.sh # Retry helper for external API calls
+│   └── validate-sprint-boundaries.sh # Validates sprint file boundaries
+├── test-workflow-mods/# Workflow integrity test suite (266 assertions)
+│   ├── run-tests.sh           # Validates entire ~/.claude/ structure
+│   └── testdata/              # Fixture projects for hook behavioral tests
+├── docs/              # Reference material (loaded on demand, not every session)
+│   ├── universal-workflow-guide.md  # How to use/extend for any language
+│   ├── evaluation-reference.md
+│   ├── anti-patterns-full.md
+│   ├── verification-gates.md
+│   ├── project-claude-md-template.md
+│   └── vague-requirements-translator.md
+├── workflow/          # Full documentation (you are here)
+└── evolution/         # Cross-project learning data
+    └── session-postmortems/    # Post-session analysis and learnings
+```
 
 ## Full Documentation
 
