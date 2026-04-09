@@ -7,7 +7,7 @@ Agents are specialized workers that live in `~/.claude/agents/`. Each has its **
 ```
 ┌───────────────────────────────────────────────────────────────────┐
 │                        ORCHESTRATOR                               │
-│  Model: sonnet  |  Tools: ALL (including Agent)                  │
+│  Model: opus    |  Tools: ALL (including Agent)                  │
 │  Role: Delegates, coordinates, merges. NEVER implements.          │
 │  Context: System instructions + progress.json + agent summaries  │
 │                                                                   │
@@ -54,7 +54,7 @@ maxTurns: 200
 
 | Agent | Model | Tools | Why This Model | Why These Tools |
 |---|---|---|---|---|
-| orchestrator | sonnet | ALL + Agent | Follows deterministic checklist; opus reserved for merge conflicts >3 files | Needs to spawn/manage other agents |
+| orchestrator | opus | ALL + Agent | Handles complex coordination, merge conflicts, and sprint lifecycle management | Needs to spawn/manage other agents |
 | sprint-executor | sonnet | Read, Write, Edit, Bash, Glob, Grep | Good cost-benefit for implementation work | Needs to write code but NOT delegate |
 | code-reviewer | sonnet | Read, Grep, Glob | Read-only analysis | ONLY read — reviewer must report, not fix |
 
@@ -113,9 +113,9 @@ Step 10: Return structured report with metrics
 
 **One orchestrator invocation = one batch.** After completing its batch, it returns control. The caller spawns the next orchestrator for the next batch, ensuring fresh context.
 
-### Why Sonnet (Not Opus)
+### Why Opus
 
-The orchestrator follows a deterministic checklist, not open-ended reasoning. It reads progress.json, finds the next batch, spawns agents, collects results, merges. This doesn't require the most powerful model. Opus is reserved for merge conflict resolution (>3 files) where genuine reasoning is needed.
+The orchestrator handles complex coordination: sprint lifecycle management, merge conflict resolution, coherence verification, and plan completeness audits. While it follows a deterministic checklist, the decisions at each step (conflict resolution, coherence assessment, when to mark blocked vs retry) benefit from stronger reasoning. The CLAUDE.md model assignment matrix specifies opus for sprint orchestration.
 
 ## The Sprint Executor
 

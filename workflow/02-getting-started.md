@@ -93,7 +93,7 @@ Brief description of what this project is.
 - API routes go in `app/api/`
 ```
 
-A full template is available at `~/.claude/docs/project-claude-md-template.md`.
+A full template is available at `~/.claude/docs/reference/project-claude-md-template.md`.
 
 ### Why Execution Config Matters
 
@@ -133,8 +133,9 @@ The key insight: `CLAUDE.md` is the only file that costs context every session. 
 | `ENABLE_LSP_TOOL` | `"1"` | Enables Language Server Protocol for code navigation |
 | `NODE_OPTIONS` | `"--max-old-space-size=2048"` | Increases Node.js memory limit |
 | `CHOKIDAR_USEPOLLING` | `"true"` | Enables polling-based file watching |
+| `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | `"62"` | Context auto-compact threshold (managed by `set-compact.sh`) |
 | `effortLevel` | `"high"` | Claude invests more reasoning in responses |
-| `defaultMode` | `"bypassPermissions"` | Allows autonomous execution (compensated by hooks) |
+| `permissions.allow` | Explicit list | Allows autonomous execution for listed tools (compensated by hooks) |
 
 ### Customization
 

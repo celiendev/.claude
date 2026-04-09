@@ -32,10 +32,20 @@ While `CLAUDE.md` provides guidelines the model "should" follow, `settings.json`
 │                        HOOK LIFECYCLE                               │
 │                                                                     │
 │  ┌──────────────────┐                                               │
+│  │  SessionStart    │ ◄── Runs once when session begins             │
+│  │  (always)        │     session-start.sh: env detection, state    │
+│  └──────────────────┘                                               │
+│                                                                     │
+│  ┌──────────────────┐                                               │
+│  │  UserPromptSubmit│ ◄── Runs when user sends a new message        │
+│  │  (always)        │     reset-delegation-counter.sh: resets reads │
+│  └──────────────────┘                                               │
+│                                                                     │
+│  ┌──────────────────┐                                               │
 │  │  PreToolUse      │ ◄── Runs BEFORE every Bash command            │
 │  │  (Bash)          │     block-dangerous.sh: hard/soft blocks      │
-│  │                  │     (proot checks merged into session-start.sh) │
 │  │                  │     check-docs-updated.sh: doc sync on push   │
+│  │                  │     block-heavy-bash.sh: delegate heavy cmds  │
 │  └──────────────────┘                                               │
 │                                                                     │
 │  ┌──────────────────┐                                               │
@@ -45,14 +55,34 @@ While `CLAUDE.md` provides guidelines the model "should" follow, `settings.json`
 │  └──────────────────┘                                               │
 │                                                                     │
 │  ┌──────────────────┐                                               │
+│  │  PreToolUse      │ ◄── Runs BEFORE Read/Grep/Glob/Bash/Agent     │
+│  │  (Read|Grep|     │     enforce-delegation.sh: soft-blocks after  │
+│  │   Glob|Bash|     │     4+ direct reads — enforces orchestrator   │
+│  │   Task|Agent)    │     delegation pattern                        │
+│  └──────────────────┘                                               │
+│                                                                     │
+│  ┌──────────────────┐                                               │
 │  │  PostToolUse     │ ◄── Runs AFTER every Write/Edit/MultiEdit     │
-│  │  (Write|Edit|    │     post-edit-quality.sh: auto-format TS/JS   │
+│  │  (Write|Edit|    │     post-edit-quality.sh: auto-format code    │
 │  │   MultiEdit)     │     check-invariants.sh: verify INVARIANTS.md │
+│  │                  │     scan-secrets.sh: detect exposed secrets    │
+│  └──────────────────┘                                               │
+│                                                                     │
+│  ┌──────────────────┐                                               │
+│  │  PreCompact      │ ◄── Runs BEFORE context compression           │
+│  │  (always)        │     compact-save.sh: saves session state      │
+│  └──────────────────┘                                               │
+│                                                                     │
+│  ┌──────────────────┐                                               │
+│  │  PostCompact     │ ◄── Runs AFTER context compression            │
+│  │  (always)        │     compact-restore.sh: restores session state│
 │  └──────────────────┘                                               │
 │                                                                     │
 │  ┌──────────────────┐                                               │
 │  │  Stop            │ ◄── Runs when the agent tries to end session  │
-│  │  (always)        │     end-of-turn-typecheck.sh: check TS types  │
+│  │  (always)        │     end-of-turn-typecheck.sh: static checking │
+│  │                  │     cleanup-artifacts.sh: moves stray media   │
+│  │                  │     cleanup-worktrees.sh: prunes worktrees    │
 │  │                  │     compound-reminder.sh: BLOCK if compound   │
 │  │                  │     hasn't run after task completion           │
 │  │                  │     verify-completion.sh: BLOCK if task marked │
@@ -76,18 +106,27 @@ While `CLAUDE.md` provides guidelines the model "should" follow, `settings.json`
 
 | Hook | Type | Trigger | Purpose | Blocking? |
 |---|---|---|---|---|
-| `block-dangerous.sh` | PreToolUse(Bash) | Every shell command | Block destructive operations; project-aware pkg mgr | Hard/soft block |
 | `session-start.sh` | SessionStart | Session begin | Detect proot, warn about issues, load session state | No (informational) |
+| `reset-delegation-counter.sh` | UserPromptSubmit | User message | Reset the delegation read counter each turn | No |
+| `block-dangerous.sh` | PreToolUse(Bash) | Every shell command | Block destructive operations; project-aware pkg mgr | Hard/soft block |
+| `check-docs-updated.sh` | PreToolUse(Bash) | `git push` | Block push if workflow files changed without doc updates | Yes (exit 2 if stale) |
+| `block-heavy-bash.sh` | PreToolUse(Bash) | Heavy commands | Soft-blocks build/test/lint commands in main agent | Soft block |
 | `check-test-exists.sh` | PreToolUse(Write/Edit) | Every file edit | TDD gate — require test file (16 languages) | Yes (exit 2 if missing) |
+| `enforce-delegation.sh` | PreToolUse(Read/Grep/etc) | 4+ direct reads | Soft-blocks main agent; enforces delegation to subagents | Soft block |
 | `post-edit-quality.sh` | PostToolUse(Write/Edit) | Every file edit | Auto-format code (all languages) | Yes (exit 2 on lint errors) |
 | `check-invariants.sh` | PostToolUse(Write/Edit) | Every file edit | Verify INVARIANTS.md rules | Yes (exit 2 on violation) |
+| `scan-secrets.sh` | PostToolUse(Write/Edit) | Every file edit | Scan for exposed secrets and credentials | Yes (exit 2 if found) |
+| `compact-save.sh` | PreCompact | Before compression | Save session state to survive context compression | No |
+| `compact-restore.sh` | PostCompact | After compression | Restore session state after context compression | No |
 | `end-of-turn-typecheck.sh` | Stop | End of turn | Static type checking (all languages) | Yes (exit 2 on type errors) |
+| `cleanup-artifacts.sh` | Stop | End of turn | Move stray media files to `.artifacts/` | No |
+| `cleanup-worktrees.sh` | Stop | End of turn | Prune stale worktrees and merged branches | No |
 | `compound-reminder.sh` | Stop | End of turn | Ensure /compound ran | Yes (exit 2 if skipped) |
 | `verify-completion.sh` | Stop | End of turn | Block premature completion | Yes (exit 2 without evidence) |
 | `validate-i18n-keys.sh` | (ship-test-ensure) | Pre-commit | Cross-validate i18n keys across locales | No (informational) |
 | `verify-worktree-merge.sh` | (orchestrator) | Post-merge | Detect silent overwrites from worktree merges | No (informational) |
-| `check-docs-updated.sh` | PreToolUse(Bash) | `git push` | Block push if workflow files changed without doc updates | Yes (exit 2 if stale) |
 | `worktree-preflight.sh` | (orchestrator) | Sprint start | Git/env readiness | N/A (utility) |
+| `harness-health.sh` | (on-demand) | Diagnostic | Validate hooks, settings, system integrity | N/A (utility) |
 | `retry-with-backoff.sh` | (utility) | API calls | Exponential backoff | N/A (utility) |
 
 ## PreToolUse: block-dangerous.sh
@@ -219,14 +258,20 @@ Was /compound run?
     "ENABLE_LSP_TOOL": "1",
     "NODE_OPTIONS": "--max-old-space-size=2048",
     "CHOKIDAR_USEPOLLING": "true",
-    "WATCHPACK_POLLING": "true"
+    "WATCHPACK_POLLING": "true",
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "62"
   },
   "permissions": {
-    "defaultMode": "bypassPermissions",
+    "allow": ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Agent", "Skill", "..."],
     "deny": []
   },
   "effortLevel": "high",
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline-command.sh"
+  },
+  "enabledPlugins": { "...": true }
 }
 ```
 
@@ -235,8 +280,11 @@ Was /compound run?
 | `ENABLE_LSP_TOOL` | Enables Language Server Protocol (goToDefinition, findReferences, etc.) |
 | `NODE_OPTIONS` | Increases Node.js memory limit (essential for proot-distro ARM64; harmless for non-Node projects) |
 | `CHOKIDAR_USEPOLLING` / `WATCHPACK_POLLING` | Enables polling-based file watching (Node.js only; harmless for others) |
-| `bypassPermissions` | Allows autonomous execution — compensated by hook safety |
+| `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | Controls when context auto-compacts (per-window targets managed by `set-compact.sh`) |
+| `permissions.allow` | Explicit allow list of tools for autonomous execution — compensated by hook safety |
 | `effortLevel: "high"` | Claude invests more tokens/reasoning in responses |
+| `statusLine` | Custom status line command for the Claude Code UI |
+| `enabledPlugins` | Plugin system with marketplace plugins (frontend-design, context7, playwright, etc.) |
 
 ## Adding Custom Hooks
 
@@ -463,28 +511,38 @@ Find overlap (files touched by both)
 
 ## Workflow Integrity Tests
 
-The system includes a self-test suite at `~/.claude/test-workflow-mods/` that validates the entire `~/.claude/` structure.
+The system includes a self-test suite at `~/.claude/test-workflow-mods/` that validates the entire `~/.claude/` structure, plus behavioral tests for individual hooks in `~/.claude/hooks/tests/`.
 
-**What it tests (123 assertions across 16 sections):**
+**What it tests (405 assertions across 45 sections):**
 
 | Section | What It Validates |
 |---|---|
-| Hook scripts | All 9 executable hooks + 1 sourced utility exist with +x |
-| TDD enforcement | 8 behavioral tests (allow/block based on test file presence) |
-| Invariant verification | 5 behavioral tests (allow/block based on INVARIANTS.md rules) |
-| Anti-premature completion | 5 behavioral tests (evidence marker handling) |
-| Auto-format (Biome/ESLint) | 8 behavioral tests (skip non-TS, skip excluded dirs, detect configs) |
-| TypeScript type checking | 3 behavioral tests (skip conditions, tsconfig detection) |
+| Hook scripts | All executable hooks exist with +x permissions |
+| TDD enforcement | Behavioral tests (allow/block based on test file presence) |
+| Invariant verification | Behavioral tests (allow/block based on INVARIANTS.md rules) |
+| Anti-premature completion | Behavioral tests (evidence marker handling) |
+| Auto-format (Biome/ESLint) | Behavioral tests (skip non-code, skip excluded dirs, detect configs) |
+| TypeScript type checking | Behavioral tests (skip conditions, tsconfig detection) |
 | settings.json registration | Every hook registered to correct lifecycle event |
 | settings.json cross-reference | Every registered hook command points to existing file |
-| CLAUDE.md documentation | 18 key concepts documented |
+| settings.json structural | Validates JSON structure, env vars, permissions |
+| CLAUDE.md documentation | Key concepts documented across CLAUDE.md and @rules/ includes |
 | Agent definitions | 3 agents with correct frontmatter, model, and behavioral checks |
-| Skill definitions | 5 skills with SKILL.md and frontmatter |
+| Skill definitions | All skills with SKILL.md and frontmatter |
 | Plan skill | Build Candidate, INVARIANTS.md, support files |
 | PRD template | Structure and section numbering |
 | Sprint spec template | Consumed Invariants section |
 | Evolution infrastructure | JSON validity, backups, directory structure |
 | Compound self-test | Compound skill references test suite |
+| check-docs-updated.sh | Docs gate on git push behavioral tests |
+| create-project | Structure, discovery interview, architecture defaults, quality gate |
+| block-dangerous.sh | Hard blocks vs soft blocks, force push via +refspec |
+| Model assignment | Matrix compliance, agent frontmatter, skills consistency |
+| Delegation rules | Mandatory rules in CLAUDE.md |
+| Autocompact config | Per-window targets, SessionStart enforcement |
+| Context engineering | Rules documentation completeness |
+
+**Hook-level tests** (`hooks/tests/`): Additional behavioral tests for `block-dangerous.sh`, `block-heavy-bash.sh`, `check-test-exists.sh`, `enforce-delegation.sh`, and `scan-secrets.sh`.
 
 **When it runs:** Automatically as Step 10 of `/compound` when any `~/.claude/` file was modified. This ensures workflow modifications don't silently break the system.
 

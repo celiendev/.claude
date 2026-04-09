@@ -103,10 +103,12 @@ Tracks success rates per model per task type, enabling data-driven model selecti
 |---|---|
 | File scanning, discovery | haiku |
 | Simple fixes (lint, typos, CSS) | haiku |
+| Session learnings compilation | haiku |
 | Standard implementation | sonnet |
 | Bug fix implementation | sonnet |
 | Test writing | sonnet |
-| Sprint orchestration | sonnet |
+| Verification & regression scan | sonnet |
+| Sprint orchestration | opus |
 | Complex multi-file refactoring | opus |
 | Architectural decisions | opus |
 | Merge conflicts (>3 files) | opus |
