@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/github/license/vinicius91carvalho/.claude)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-workflow_system-blueviolet)](https://docs.anthropic.com/en/docs/claude-code)
 [![Languages](https://img.shields.io/badge/languages-16_supported-blue)](#supported-languages)
-[![Hooks](https://img.shields.io/badge/hooks-19_enforced-green)](#safety-enforcement-hooks)
+[![Hooks](https://img.shields.io/badge/hooks-18_enforced-green)](#safety-enforcement-hooks)
 
 A portable AI engineering system for Claude Code that applies automatically to every project. Built on the Compound Engineering philosophy: each unit of work makes subsequent units easier — not harder.
 
@@ -93,11 +93,13 @@ After shipping, `/compound` auto-captures learnings and promotes patterns — ma
 | `/create-project` | Greenfield project PRD with discovery interview and architecture defaults | "New project", "start a project", "build me an app" |
 | `/plan` | Generates PRD only | "Just plan, don't build yet" |
 | `/plan-build-test` | Plans, executes with agent teams, verifies locally | "Build this feature / fix this bug" |
+| `/research` | Deep multi-agent research via Stochastic Consensus & Debate | "How should I...", "compare approaches for...", "what's the best way to..." |
 | `/ship-test-ensure` | Branch, PR, staging E2E, production deploy, Lighthouse (optional) | "Ship what I've built" |
 | `/compound` | Captures learnings, updates error registry, evolves system | Auto-invoked after task completion |
 | `/workflow-audit` | Reviews model performance, error patterns, rule staleness | Monthly or after 10+ sessions |
 | `/update-docs` | Analyzes codebase and updates README/docs to match current code | "Update docs", "sync readme", or when push is blocked by stale docs |
-
+| `/find-skills` | Discovers and installs skills from the open agent skills ecosystem | "Find a skill for X", "is there a skill that can..." |
+| `/playwright-stealth` | Anti-detection browsing via Patchright + Xvfb for own content verification | "Stealth browse", "get page content", "check this site" |
 
 **Autonomous pipeline:** `/plan` → review PRD → `/plan-build-test` (autonomous) → manual test → `/ship-test-ensure` (autonomous through staging, confirms before production).
 
@@ -105,7 +107,7 @@ After shipping, `/compound` auto-captures learnings and promotes patterns — ma
 
 | Agent | Role | Model | Key Constraint |
 |---|---|---|---|
-| **Orchestrator** | Delegates, coordinates, merges | sonnet | Never implements code directly |
+| **Orchestrator** | Delegates, coordinates, merges | opus | Never implements code directly |
 | **Sprint Executor** | Implements sprints in isolation | sonnet | Cannot delegate to other agents |
 | **Code Reviewer** | Read-only post-merge audit | sonnet | Cannot modify any files |
 
@@ -115,21 +117,30 @@ The system uses deterministic hooks — real code that runs before/after every a
 
 | Hook | Trigger | What It Does |
 |---|---|---|
-| `block-dangerous.sh` | Every Bash command | Blocks `rm -rf /`, force push; project-aware package manager enforcement |
-| `check-test-exists.sh` | Every file edit | TDD gate — blocks production code edits without test file (16 languages) |
-| `check-invariants.sh` | Every file edit | Verifies INVARIANTS.md rules after edits |
-| `post-edit-quality.sh` | Every file edit | Auto-formats code using detected formatter (Biome, ruff, rustfmt, gofmt, etc.) |
-| `end-of-turn-typecheck.sh` | Session end | Static type checking (tsc, cargo check, go vet, mypy, pyright, etc.) |
-| `compound-reminder.sh` | Session end | Blocks exit without learning capture |
-| `verify-completion.sh` | Session end | Blocks premature completion without evidence |
+| `block-dangerous.sh` | PreToolUse(Bash) | Blocks `rm -rf /`, force push; project-aware package manager enforcement |
+| `block-heavy-bash.sh` | PreToolUse(Bash) | Soft-blocks heavy build/test commands in the main agent (delegate to subagent) |
+| `check-docs-updated.sh` | PreToolUse(Bash) | Blocks push if hooks/skills/agents changed without doc updates |
+| `check-test-exists.sh` | PreToolUse(Write/Edit) | TDD gate — blocks production code edits without test file (16 languages) |
+| `enforce-delegation.sh` | PreToolUse(Read/Grep/Bash/Agent) | Soft-blocks after 4+ direct reads; enforces orchestrator-delegates pattern |
+| `post-edit-quality.sh` | PostToolUse(Write/Edit) | Auto-formats code using detected formatter (Biome, ruff, rustfmt, gofmt, etc.) |
+| `check-invariants.sh` | PostToolUse(Write/Edit) | Verifies INVARIANTS.md rules after edits |
+| `scan-secrets.sh` | PostToolUse(Write/Edit) | Scans edited files for exposed secrets and credentials |
+| `end-of-turn-typecheck.sh` | Stop | Static type checking (tsc, cargo check, go vet, mypy, pyright, etc.) |
+| `cleanup-artifacts.sh` | Stop | Moves stray media files to `.artifacts/` and updates `.gitignore` |
+| `cleanup-worktrees.sh` | Stop | Prunes stale worktrees and removes merged sprint branches |
+| `compound-reminder.sh` | Stop | Blocks exit without learning capture |
+| `verify-completion.sh` | Stop | Blocks premature completion without evidence |
+| `session-start.sh` | SessionStart | Detects proot-distro ARM64, warns about issues, loads session state |
+| `reset-delegation-counter.sh` | UserPromptSubmit | Resets the delegation read counter each turn |
+| `compact-save.sh` | PreCompact | Saves session state before context compression |
+| `compact-restore.sh` | PostCompact | Restores session state after context compression |
 | `scripts/validate-i18n-keys.sh` | Pre-commit (via ship-test-ensure) | Cross-validates all i18n t() keys exist in all locale files |
 | `scripts/verify-worktree-merge.sh` | Post-merge (via orchestrator) | Detects files silently overwritten by worktree merges |
-| `check-docs-updated.sh` | Every `git push` (PreToolUse) | Blocks push if hooks/skills/agents changed without doc updates |
-| `session-start.sh` | SessionStart | Detects proot-distro ARM64, warns about issues, loads session state |
 | `scripts/worktree-preflight.sh` | Orchestrator step 0 | Detects project languages, installs deps per-language in worktrees |
 | `scripts/validate-sprint-boundaries.sh` | After sprint extraction | Validates no file conflicts between parallel sprints |
+| `scripts/harness-health.sh` | On-demand diagnostic | Validates hooks, settings, and system integrity |
 
-All hooks auto-detect the project's language(s) via `hooks/lib/detect-project.sh`. Adding support for a new language means updating one file — see [Universal Workflow Guide](docs/universal-workflow-guide.md).
+All hooks auto-detect the project's language(s) via `hooks/lib/detect-project.sh`. Adding support for a new language means updating one file — see [Universal Workflow Guide](docs/reference/universal-workflow-guide.md).
 
 #### Supported Languages
 
@@ -137,57 +148,100 @@ TypeScript, JavaScript, Python, Go, Rust, Ruby, Java, Kotlin, Elixir, Swift, Dar
 
 ### Workflow Integrity Tests
 
-The system includes a self-test suite (`test-workflow-mods/run-tests.sh`) with 123 assertions that validates the entire `~/.claude/` structure: hook existence and executability, settings.json registration and cross-references, CLAUDE.md documentation coverage, agent/skill structure, and evolution infrastructure. Runs automatically as the final step of `/compound` whenever workflow files are modified.
+The system includes a self-test suite (`test-workflow-mods/run-tests.sh`) with 405 assertions across 45 sections that validates the entire `~/.claude/` structure: hook existence and executability, settings.json registration and cross-references, CLAUDE.md documentation coverage, agent/skill structure, evolution infrastructure, and behavioral tests for key hooks. Runs automatically as the final step of `/compound` whenever workflow files are modified. Additional behavioral tests live in `hooks/tests/` (block-dangerous, block-heavy-bash, check-test-exists, enforce-delegation, scan-secrets).
 
 ## Repository Structure
 
 ```
 ~/.claude/
-├── CLAUDE.md          # The brain — all rules, workflows, and judgment protocols
-├── settings.json      # Deterministic enforcement via hooks
-├── agents/            # Specialized workers with isolated context windows
-│   ├── orchestrator.md    # Delegates and coordinates — never implements
-│   ├── sprint-executor.md # Implements sprints in isolated worktrees
-│   └── code-reviewer.md   # Read-only auditor — reports, never fixes
-├── skills/            # Auto-invocable step-by-step workflows
-│   ├── plan/              # PRD generation (/plan)
-│   ├── create-project/    # Greenfield project PRD with architecture defaults
-│   ├── plan-build-test/   # Local pipeline: discover → plan → execute → verify
-│   ├── ship-test-ensure/  # Deploy: branch → PR → staging → E2E → production
-│   ├── compound/          # Post-task learning capture
-│   ├── workflow-audit/    # Periodic system self-review
-│   └── update-docs/       # Analyze code and update project documentation
-├── hooks/             # Safety enforcement scripts (language-universal)
-│   ├── lib/
-│   │   └── detect-project.sh   # Shared language/project detection (16 languages)
-│   ├── block-dangerous.sh     # Blocks rm -rf, force push, project-aware pkg mgr
-│   ├── check-test-exists.sh   # TDD gate — blocks edits without test file (all langs)
-│   ├── check-invariants.sh    # Verifies INVARIANTS.md rules after edits
-│   ├── post-edit-quality.sh   # Auto-formats code after every edit (all langs)
-│   ├── end-of-turn-typecheck.sh # Static type checking (all langs)
-│   ├── compound-reminder.sh   # Blocks session end without learning capture
-│   ├── verify-completion.sh   # Blocks premature completion claims
-│   ├── check-docs-updated.sh # Blocks push if workflow changed without doc updates
-│   ├── scripts/               # Utility scripts called by skills/agents
-│   │   ├── approve.sh         # Soft-block approval mechanism
-│   │   ├── retry-with-backoff.sh # Retry helper for external API calls
-│   │   ├── validate-i18n-keys.sh # Cross-validates i18n keys across locales
+├── CLAUDE.md              # The brain — all rules, workflows, and judgment protocols
+├── settings.json          # Deterministic enforcement via hooks and permissions
+├── VERSION                # Semantic version of the workflow system
+├── set-compact.sh         # Context budget management (per-window autocompact)
+├── statusline-command.sh  # Status line display for the Claude Code UI
+├── agents/                # Specialized workers with isolated context windows
+│   ├── orchestrator.md        # Delegates and coordinates — never implements (opus)
+│   ├── sprint-executor.md     # Implements sprints in isolated worktrees (sonnet)
+│   └── code-reviewer.md       # Read-only auditor — reports, never fixes (sonnet)
+├── skills/                # Auto-invocable step-by-step workflows
+│   ├── plan/                  # PRD generation (/plan)
+│   ├── create-project/        # Greenfield project PRD with architecture defaults
+│   ├── plan-build-test/       # Local pipeline: discover → plan → execute → verify
+│   ├── research/              # Deep multi-agent research via Stochastic Consensus
+│   ├── ship-test-ensure/      # Deploy: branch → PR → staging → E2E → production
+│   ├── compound/              # Post-task learning capture
+│   ├── workflow-audit/        # Periodic system self-review
+│   ├── update-docs/           # Analyze code and update project documentation
+│   ├── playwright-stealth/    # Anti-detection browsing for content verification
+│   └── find-skills/           # Discover and install skills from the ecosystem
+├── rules/                 # Modular rule files included by CLAUDE.md via @rules/
+│   ├── workflow.md            # Sprint system, context engineering, agent architecture
+│   ├── quality.md             # Evaluation, self-improvement, session learnings
+│   └── environment.md         # PRoot-Distro ARM64 environment rules
+├── commands/              # Custom slash commands
+│   └── setup-hooks.md         # /setup-hooks — detect stack and verify hook config
+├── hooks/                 # Safety enforcement scripts (language-universal)
+│   ├── lib/                   # Shared libraries
+│   │   ├── detect-project.sh      # Language/project detection (16 languages)
+│   │   ├── approvals.sh           # Soft-block approval helpers
+│   │   ├── hook-logger.sh         # Hook execution logging
+│   │   ├── project-cache.sh       # Project detection caching
+│   │   └── stop-guard.sh          # Stop hook re-entrancy guard
+│   ├── block-dangerous.sh        # Blocks rm -rf, force push, project-aware pkg mgr
+│   ├── block-heavy-bash.sh       # Soft-blocks heavy build/test in main agent
+│   ├── check-test-exists.sh      # TDD gate — blocks edits without test file
+│   ├── check-invariants.sh       # Verifies INVARIANTS.md rules after edits
+│   ├── check-docs-updated.sh     # Blocks push if workflow changed without docs
+│   ├── post-edit-quality.sh      # Auto-formats code after every edit
+│   ├── scan-secrets.sh           # Scans for exposed secrets in edited files
+│   ├── enforce-delegation.sh     # Enforces orchestrator delegation pattern
+│   ├── reset-delegation-counter.sh # Resets read counter each turn
+│   ├── end-of-turn-typecheck.sh  # Static type checking (all langs)
+│   ├── cleanup-artifacts.sh      # Moves stray media to .artifacts/
+│   ├── cleanup-worktrees.sh      # Prunes stale worktrees
+│   ├── compact-save.sh           # Saves state before context compression
+│   ├── compact-restore.sh        # Restores state after context compression
+│   ├── compound-reminder.sh      # Blocks session end without learning capture
+│   ├── verify-completion.sh      # Blocks premature completion claims
+│   ├── session-start.sh          # Environment detection and session init
+│   ├── approve.sh                # Soft-block approval entry point
+│   ├── scripts/                  # Utility scripts called by skills/agents
+│   │   ├── approve.sh                # Batch approval mechanism
+│   │   ├── harness-health.sh         # System health diagnostic
+│   │   ├── retry-with-backoff.sh     # Retry helper for external API calls
+│   │   ├── validate-i18n-keys.sh     # Cross-validates i18n keys across locales
 │   │   ├── validate-sprint-boundaries.sh # Validates sprint file boundaries
-│   │   ├── verify-worktree-merge.sh # Detects silent overwrites in worktree merges
-│   │   └── worktree-preflight.sh # Language-aware worktree dependency setup
-├── test-workflow-mods/# Workflow integrity test suite (266 assertions)
+│   │   ├── verify-worktree-merge.sh  # Detects silent overwrites in merges
+│   │   └── worktree-preflight.sh     # Language-aware worktree dependency setup
+│   └── tests/                    # Behavioral tests for hooks
+│       ├── run-all.sh                # Runs all hook tests
+│       ├── test-block-dangerous.sh
+│       ├── test-block-heavy-bash.sh
+│       ├── test-check-test-exists.sh
+│       ├── test-enforce-delegation.sh
+│       └── test-scan-secrets.sh
+├── test-workflow-mods/    # Workflow integrity test suite (405 assertions)
 │   ├── run-tests.sh           # Validates entire ~/.claude/ structure
 │   └── testdata/              # Fixture projects for hook behavioral tests
-├── docs/              # Reference material (loaded on demand, not every session)
-│   ├── universal-workflow-guide.md  # How to use/extend for any language
-│   ├── evaluation-reference.md
-│   ├── anti-patterns-full.md
-│   ├── verification-gates.md
-│   ├── project-claude-md-template.md
-│   └── vague-requirements-translator.md
-├── workflow/          # Full documentation (you are here)
-└── evolution/         # Cross-project learning data
-    └── session-postmortems/    # Post-session analysis and learnings
+├── docs/                  # Reference material (loaded on demand, not every session)
+│   ├── on-demand/             # Detailed guides loaded by skills when needed
+│   │   ├── anti-patterns-full.md
+│   │   ├── browser-verification.md
+│   │   ├── dev-server-protocol.md
+│   │   ├── evaluation-reference.md
+│   │   ├── proot-distro-environment.md
+│   │   ├── vague-requirements-translator.md
+│   │   └── verification-gates.md
+│   └── reference/             # Templates and guides
+│       ├── model-assignment.md
+│       ├── project-claude-md-template.md
+│       └── universal-workflow-guide.md
+├── workflow/              # Full documentation
+└── evolution/             # Cross-project learning data
+    ├── error-registry.json    # Error patterns across projects
+    ├── model-performance.json # Model success rate tracking
+    ├── workflow-changelog.md  # System evolution history
+    └── session-postmortems/   # Post-session analysis and learnings
 ```
 
 ## Full Documentation

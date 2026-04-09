@@ -7,12 +7,15 @@
 ├── CLAUDE.md                           # The brain — all rules and workflows
 ├── README.md                           # Documentation for humans
 ├── settings.json                       # Deterministic enforcement — hooks & permissions
+├── VERSION                             # Semantic version of the workflow system
+├── set-compact.sh                      # Context budget management (per-window autocompact)
+├── statusline-command.sh               # Status line display for Claude Code UI
 ├── .gitignore                          # What NOT to version control
 │
 ├── agents/                             # Specialized agents with their own context
-│   ├── orchestrator.md                 # Project manager — delegates, never implements
-│   ├── sprint-executor.md              # Worker — implements a sprint in isolation
-│   └── code-reviewer.md               # Auditor — read-only, cannot modify code
+│   ├── orchestrator.md                 # Project manager — delegates, never implements (opus)
+│   ├── sprint-executor.md              # Worker — implements a sprint in isolation (sonnet)
+│   └── code-reviewer.md               # Auditor — read-only, cannot modify code (sonnet)
 │
 ├── skills/                             # Auto-invocable workflows
 │   ├── plan/                           # Planning and PRD generation
@@ -21,7 +24,11 @@
 │   │   ├── prd-template-minimal.md     # Minimal PRD template (Standard mode)
 │   │   ├── prd-template-full.md        # Full PRD template (PRD+Sprint mode)
 │   │   └── sprint-spec-template.md     # Sprint specification template
+│   ├── create-project/                 # Greenfield project PRD with architecture defaults
+│   │   └── SKILL.md
 │   ├── plan-build-test/                # Full local pipeline
+│   │   └── SKILL.md
+│   ├── research/                       # Deep multi-agent research (Stochastic Consensus)
 │   │   └── SKILL.md
 │   ├── ship-test-ensure/               # Deploy pipeline
 │   │   └── SKILL.md
@@ -29,37 +36,79 @@
 │   │   └── SKILL.md
 │   ├── workflow-audit/                 # Periodic system self-review
 │   │   └── SKILL.md
-│   └── update-docs/                   # Analyze code and update project docs
+│   ├── update-docs/                    # Analyze code and update project docs
+│   │   └── SKILL.md
+│   ├── playwright-stealth/             # Anti-detection browsing for content verification
+│   │   └── SKILL.md
+│   └── find-skills/                    # Discover and install skills from the ecosystem
 │       └── SKILL.md
 │
+├── rules/                              # Modular rule files included via @rules/
+│   ├── workflow.md                     # Sprint system, context engineering, agents
+│   ├── quality.md                      # Evaluation, self-improvement, session learnings
+│   └── environment.md                  # PRoot-Distro ARM64 environment rules
+│
+├── commands/                           # Custom slash commands
+│   └── setup-hooks.md                  # /setup-hooks — detect stack, verify hook config
+│
 ├── hooks/                              # Deterministic enforcement scripts
+│   ├── lib/                            # Shared libraries
+│   │   ├── detect-project.sh           # Language/project detection (16 languages)
+│   │   ├── approvals.sh               # Soft-block approval helpers
+│   │   ├── hook-logger.sh             # Hook execution logging
+│   │   ├── project-cache.sh           # Project detection caching
+│   │   └── stop-guard.sh             # Stop hook re-entrancy guard
 │   ├── block-dangerous.sh              # Blocks destructive commands
+│   ├── block-heavy-bash.sh             # Soft-blocks heavy build/test in main agent
 │   ├── check-test-exists.sh            # TDD gate — blocks edits without test file
 │   ├── check-invariants.sh             # Verifies INVARIANTS.md rules after edits
-│   ├── post-edit-quality.sh            # Auto-formats code after edits
-│   ├── end-of-turn-typecheck.sh        # Type-checks TypeScript at end of turn
+│   ├── check-docs-updated.sh           # Blocks push if workflow changed without docs
+│   ├── post-edit-quality.sh            # Auto-formats code after edits (all langs)
+│   ├── scan-secrets.sh                 # Scans for exposed secrets in edited files
+│   ├── enforce-delegation.sh           # Enforces orchestrator delegation pattern
+│   ├── reset-delegation-counter.sh     # Resets read counter each turn
+│   ├── end-of-turn-typecheck.sh        # Static type checking (all langs)
+│   ├── cleanup-artifacts.sh            # Moves stray media to .artifacts/
+│   ├── cleanup-worktrees.sh            # Prunes stale worktrees
+│   ├── compact-save.sh                 # Saves state before context compression
+│   ├── compact-restore.sh              # Restores state after context compression
 │   ├── compound-reminder.sh            # Blocks session end without learning capture
 │   ├── verify-completion.sh            # Blocks premature completion claims
-│   ├── check-docs-updated.sh           # Blocks push if workflow changed without docs
+│   ├── session-start.sh                # Environment detection and session init
+│   ├── approve.sh                      # Soft-block approval entry point
 │   ├── scripts/                        # Utility scripts called by skills/agents
-│   │   ├── approve.sh                  # Soft-block approval mechanism
-│   │   ├── retry-with-backoff.sh       # Utility for API rate limit handling
+│   │   ├── approve.sh                  # Batch approval mechanism
+│   │   ├── harness-health.sh           # System health diagnostic
+│   │   ├── retry-with-backoff.sh       # Retry helper for external API calls
 │   │   ├── validate-i18n-keys.sh       # Cross-validates i18n keys across locales
 │   │   ├── validate-sprint-boundaries.sh # Sprint file boundary validation
-│   │   ├── verify-worktree-merge.sh    # Detects silent overwrites in worktree merges
-│   │   └── worktree-preflight.sh       # Git and dependency readiness
+│   │   ├── verify-worktree-merge.sh    # Detects silent overwrites in merges
+│   │   └── worktree-preflight.sh       # Language-aware worktree dependency setup
+│   └── tests/                          # Behavioral tests for hooks
+│       ├── run-all.sh
+│       ├── test-block-dangerous.sh
+│       ├── test-block-heavy-bash.sh
+│       ├── test-check-test-exists.sh
+│       ├── test-enforce-delegation.sh
+│       └── test-scan-secrets.sh
 │
 ├── test-workflow-mods/                 # Workflow integrity test suite
-│   ├── run-tests.sh                    # 123 assertions validating ~/.claude/ structure
+│   ├── run-tests.sh                    # 405 assertions validating ~/.claude/ structure
 │   └── testdata/                       # Fixture projects for hook behavioral tests
 │
 ├── docs/                               # Reference material (loaded on demand)
-│   ├── evaluation-reference.md         # Quality evaluation checklists
-│   ├── anti-patterns-full.md           # 10 anti-patterns with examples and fixes
-│   ├── vague-requirements-translator.md
-│   ├── verification-gates.md           # 6 blocking verification gates
-│   ├── proot-distro-environment.md     # proot-distro ARM64 guide
-│   └── project-claude-md-template.md   # Template for project-specific CLAUDE.md
+│   ├── on-demand/                      # Detailed guides loaded by skills when needed
+│   │   ├── anti-patterns-full.md       # 10 anti-patterns with examples and fixes
+│   │   ├── browser-verification.md     # End-of-task browser verification protocol
+│   │   ├── dev-server-protocol.md      # Dev server management protocol
+│   │   ├── evaluation-reference.md     # Quality evaluation checklists
+│   │   ├── proot-distro-environment.md # proot-distro ARM64 guide
+│   │   ├── vague-requirements-translator.md
+│   │   └── verification-gates.md       # 6 blocking verification gates
+│   └── reference/                      # Templates and guides
+│       ├── model-assignment.md         # Model assignment reference
+│       ├── project-claude-md-template.md # Template for project-specific CLAUDE.md
+│       └── universal-workflow-guide.md # How to use/extend for any language
 │
 ├── workflow/                           # This documentation
 │

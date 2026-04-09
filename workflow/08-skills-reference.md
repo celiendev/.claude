@@ -36,6 +36,9 @@ Skills are auto-invocable workflows that live in `~/.claude/skills/`. Each skill
 │                      patterns, rule staleness.                         │
 │                                                                        │
 │    STANDALONE SKILLS (not part of the main pipeline):                  │
+│    /research            Deep multi-agent research (Stochastic          │
+│                         Consensus & Debate)                            │
+│    /find-skills         Discover and install skills from ecosystem     │
 │    /playwright-stealth  Anti-detection browsing for own content        │
 │                                                                        │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -270,7 +273,7 @@ Steps 6-8: Cross-project promotion
 Step 9:    Write completion marker
 
 Step 10:   Workflow Integrity Gate (if ~/.claude/ files modified)
-           Run test-workflow-mods/run-tests.sh (112 assertions)
+           Run test-workflow-mods/run-tests.sh (405 assertions)
            ├── All pass → proceed
            └── Failures → fix before finalizing
 
@@ -357,6 +360,47 @@ Step 5: Report
 **Key principles:** Concise over verbose. Accurate over complete. Delete wrong docs rather than adding more. Examples over descriptions.
 
 **Trigger:** "update docs", "sync readme", "docs are stale", or auto-invoked when `check-docs-updated.sh` blocks a push.
+
+---
+
+## /research — Deep Multi-Agent Research
+
+**Trigger:** "how should I...", "what's the best way to...", "compare approaches for...", or `/research` explicitly.
+
+Uses **Stochastic Consensus & Debate**: spawns N researcher agents (sonnet) in parallel, each exploring a question from a distinct angle, then synthesizes with a single opus agent that weighs evidence quality, detects consensus, and arbitrates disagreements.
+
+### How It Works
+
+```
+Input: Question + optional N (default 5, range 3-10)
+    │
+    ▼
+Spawn N researcher agents (sonnet, parallel)
+    ├── Researcher 1: angle A (e.g., performance)
+    ├── Researcher 2: angle B (e.g., maintainability)
+    ├── ...
+    └── Researcher N: angle N (e.g., security)
+    │
+    ▼
+Synthesizer agent (opus)
+    ├── Weigh evidence quality per researcher
+    ├── Detect genuine consensus vs averaged opinions
+    ├── Arbitrate disagreements with reasoning
+    └── Produce actionable recommendations
+    │
+    ▼
+Output: Structured research report with confidence levels
+```
+
+**Not for:** Simple factual questions, code generation, task execution, or single-file fixes.
+
+---
+
+## /find-skills — Skill Discovery
+
+**Trigger:** "find a skill for X", "is there a skill that can...", "how do I do X" (when X might be a common task with an existing skill).
+
+Helps discover and install skills from the open agent skills ecosystem via the Skills CLI (`npx skills`). Searches for specialized capabilities, workflows, and tools that extend the agent's abilities.
 
 ---
 
