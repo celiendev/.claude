@@ -196,17 +196,16 @@ The PRD includes these sections:
 
 ## Phase 4 — Sprint Extraction
 
-After writing `spec.md`, extract sprints using the existing sprint system:
+After writing `spec.md`, run the sprint extraction protocol.
 
-1. Create `sprints/` subdirectory
-2. For each sprint, create `sprints/NN-title.md` using `~/.claude/skills/plan/sprint-spec-template.md`
-3. Determine file boundaries per sprint (files_to_create, files_to_modify, files_read_only, shared_contracts)
-4. Create `progress.json` with initial state
-5. Create `INVARIANTS.md` for cross-cutting concepts
-6. Run `~/.claude/hooks/validate-sprint-boundaries.sh <prd-directory>` — mandatory, fix violations before proceeding
-7. Tag as Build Candidate
+Full protocol (sprint spec format, file boundary rules, progress.json schema, INVARIANTS.md
+format, validate-sprint-boundaries.sh invocation, Build Candidate tagging):
+`~/.claude/skills/plan/sprint-extraction-protocol.md`
 
-This ensures full compatibility with `/plan-build-test` for execution.
+Summary: create `sprints/NN-title.md` per sprint (self-contained, file boundaries declared)
+→ create `progress.json` → create `INVARIANTS.md` → run
+`bash ~/.claude/hooks/scripts/validate-sprint-boundaries.sh <prd-dir>` → tag Build Candidate.
+Maximum 5 sprints per PRD. This ensures full compatibility with `/plan-build-test`.
 
 ---
 

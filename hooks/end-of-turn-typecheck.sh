@@ -21,14 +21,14 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
+# Source shared stop-guard (fail-open: if missing, guard is a no-op)
+source ~/.claude/hooks/lib/stop-guard.sh 2>/dev/null || true
+
 # Read JSON input from stdin
 INPUT=$(cat)
 
 # Check stop_hook_active — prevent infinite loop
-STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
-if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
-  exit 0
-fi
+check_stop_hook_active "$INPUT"
 
 # Resolve project directory
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"

@@ -7,7 +7,33 @@
 
 set -euo pipefail
 
+# Fail-open if python3 is unavailable (rather than silently returning empty results)
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 not found; skipping i18n validation" >&2
+  exit 0
+fi
+
 PROJECT_ROOT="${1:-.}"
+
+# Shared flatten() helper — deduplicated so both lookups stay in sync.
+FLATTEN_SCRIPT='
+import json, sys
+
+def flatten(obj, prefix=""):
+    keys = []
+    for k, v in obj.items():
+        key = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            keys.extend(flatten(v, key))
+        else:
+            keys.append(key)
+    return keys
+
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+for k in sorted(flatten(data)):
+    print(k)
+'
 
 # Detect if project uses i18n (next-intl, react-intl, i18next, etc.)
 if ! grep -rq '"next-intl"\|"react-intl"\|"i18next"\|"react-i18next"' \
@@ -41,24 +67,7 @@ for dir in $(echo "$I18N_FILES" | xargs -I{} dirname {} | sort -u); do
   [ -f "$ref_file" ] || continue
 
   # Get all keys from reference locale (flattened dot notation)
-  ref_keys=$(python3 -c "
-import json, sys
-
-def flatten(obj, prefix=''):
-    keys = []
-    for k, v in obj.items():
-        key = f'{prefix}.{k}' if prefix else k
-        if isinstance(v, dict):
-            keys.extend(flatten(v, key))
-        else:
-            keys.append(key)
-    return keys
-
-with open('$ref_file') as f:
-    data = json.load(f)
-for k in sorted(flatten(data)):
-    print(k)
-" 2>/dev/null)
+  ref_keys=$(python3 -c "$FLATTEN_SCRIPT" "$ref_file" 2>/dev/null)
 
   # Check each other locale has the same keys
   for locale in $LOCALES; do
@@ -66,24 +75,7 @@ for k in sorted(flatten(data)):
     locale_file="$dir/$locale.json"
     [ -f "$locale_file" ] || continue
 
-    locale_keys=$(python3 -c "
-import json, sys
-
-def flatten(obj, prefix=''):
-    keys = []
-    for k, v in obj.items():
-        key = f'{prefix}.{k}' if prefix else k
-        if isinstance(v, dict):
-            keys.extend(flatten(v, key))
-        else:
-            keys.append(key)
-    return keys
-
-with open('$locale_file') as f:
-    data = json.load(f)
-for k in sorted(flatten(data)):
-    print(k)
-" 2>/dev/null)
+    locale_keys=$(python3 -c "$FLATTEN_SCRIPT" "$locale_file" 2>/dev/null)
 
     # Find keys in ref but not in locale
     missing=$(comm -23 <(echo "$ref_keys" | sort) <(echo "$locale_keys" | sort))

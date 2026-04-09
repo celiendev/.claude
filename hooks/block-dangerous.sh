@@ -22,8 +22,11 @@ fi
 # Source shared logger
 source ~/.claude/hooks/lib/hook-logger.sh 2>/dev/null || true
 
+# Source shared soft-block emitter (fail-open: if missing, ask() uses inline fallback)
+source ~/.claude/hooks/lib/approvals.sh 2>/dev/null || true
+
 # === APPROVAL TOKEN MECHANISM ===
-# Soft-blocked commands can be approved via: ! ~/.claude/hooks/approve.sh
+# Soft-blocked commands can be approved via: ! ~/.claude/hooks/scripts/approve.sh
 # The hook creates a pending file on soft-block; approve.sh moves it to approved.
 # On retry, the hook finds the approval token and allows the command.
 APPROVAL_DIR="$HOME/.claude/hooks/.approvals"
@@ -62,21 +65,16 @@ EOJSON
 # Uses "deny" instead of "ask" because "ask" is silently ignored in bypassPermissions mode.
 # Creates a pending approval file so Claude can approve via AskUserQuestion → approve.sh.
 ask() {
-  # Create pending approval file
-  mkdir -p "$PENDING_DIR" 2>/dev/null || true
-  printf 'Reason: %s\nCommand: %s\nTime: %s\n' "$1" "$COMMAND" "$(date -Iseconds 2>/dev/null || date)" > "$PENDING_DIR/$CMD_HASH"
-
-  log_hook_event "block-dangerous" "soft-blocked" "$1"
-  cat <<EOJSON
-{
-  "hookSpecificOutput": {
-    "hookEventName": "PreToolUse",
-    "permissionDecision": "deny",
-    "permissionDecisionReason": "SOFT_BLOCK_APPROVAL_NEEDED: $1"
-  }
-}
-EOJSON
-  exit 0
+  # Delegate to shared emit_soft_block if available; fallback to inline logic
+  if command -v emit_soft_block >/dev/null 2>&1; then
+    emit_soft_block "block-dangerous" "$1" "$COMMAND" "$PENDING_DIR" "$CMD_HASH"
+  else
+    mkdir -p "$PENDING_DIR" 2>/dev/null || true
+    printf 'Reason: %s\nCommand: %s\nTime: %s\n' "$1" "$COMMAND" "$(date -Iseconds 2>/dev/null || date)" > "$PENDING_DIR/$CMD_HASH"
+    log_hook_event "block-dangerous" "soft-blocked" "$1"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"SOFT_BLOCK_APPROVAL_NEEDED: %s"}}\n' "$1"
+    exit 0
+  fi
 }
 
 # All pattern checks use bash built-in regex — no subprocesses

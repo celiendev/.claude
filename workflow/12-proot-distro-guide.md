@@ -29,8 +29,8 @@ proot-distro is a user-space process emulator. It doesn't have a real kernel —
 If `uname -r` contains `PRoot-Distro` AND `uname -m` = `aarch64`, all proot rules activate automatically. Three layers handle proot:
 
 1. **settings.json env:** Sets `NODE_OPTIONS`, `CHOKIDAR_USEPOLLING`, `WATCHPACK_POLLING` globally
-2. **proot-preflight.sh:** Runs once per session; warns about disk, symlinks, SST locks
-3. **worktree-preflight.sh:** Called by orchestrator; sets env vars and fixes deps for sprint execution
+2. **session-start.sh:** Runs once per session (SessionStart hook); includes proot detection, warns about disk, symlinks, SST locks
+3. **worktree-preflight.sh (hooks/scripts/):** Called by orchestrator; sets env vars and fixes deps for sprint execution
 
 ## Mandatory Rules
 
@@ -41,7 +41,7 @@ If `uname -r` contains `PRoot-Distro` AND `uname -m` = `aarch64`, all proot rule
 | NEVER set tight timeouts | Everything runs 2-5x slower. Multiply by 3x minimum. |
 | NEVER use Lighthouse as quality gate | Scores unreliable in proot. Mark as `BLOCKED: proot-distro ARM64`. |
 | ALWAYS use polling for file watching | `CHOKIDAR_USEPOLLING=true` set globally in settings.json |
-| ALWAYS use retry-with-backoff for APIs | Source `~/.claude/hooks/retry-with-backoff.sh` |
+| ALWAYS use retry-with-backoff for APIs | Source `~/.claude/hooks/scripts/retry-with-backoff.sh` |
 
 ## Known Native Module Failures
 

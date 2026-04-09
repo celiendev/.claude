@@ -105,7 +105,6 @@ _FILE_MTIME=$(stat -c %Y "$FILE_PATH" 2>/dev/null || echo 0)
 # === SANDBOX: Command whitelist/blocklist for verify commands ===
 # INVARIANTS.md files may come from cloned repos. Restrict what verify commands can run.
 
-SAFE_CMDS="grep|test|jq|wc|diff|cat|find|ls|head|tail|sort|uniq|echo|true|false|\\[|stat|file"
 BLOCKED_PATTERNS="curl|wget|nc|ncat|bash|sh|zsh|python|python3|node|ruby|perl|eval|exec|source|\\.|sudo|su|chmod|chown|rm|mv|cp|dd|mkfs|mount|kill|pkill|xargs"
 
 is_safe_verify_cmd() {

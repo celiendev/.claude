@@ -52,16 +52,16 @@ arbitrates disagreements into actionable recommendations.
 
 | Parameter | Default | Range | Override |
 |-----------|---------|-------|----------|
-| Agent count | 5 | 3–10 | `/research 7 "question"` |
+| Agent count | 3 | 2–5 | `/research 5 "question"` |
 | Depth | standard | quick/standard/deep | `--depth=quick` |
 | Scope | codebase | codebase/web/full | `--scope=web` |
 
 **Depth → turns mapping:**
 | Depth | Agents | Max turns each | Use case |
 |-------|--------|---------------|----------|
-| quick | 3 | 20 | Fast orientation, time-boxed decision |
-| standard | 5 | 50 | Default — thorough without exhaustive |
-| deep | 7–10 | 100 | Architecture decisions, major tradeoffs |
+| quick | 2 | 15 | Fast orientation, time-boxed decision |
+| standard | 3 | 30 | Default — thorough without exhaustive |
+| deep | 5 | 60 | Architecture decisions, major tradeoffs |
 
 **Scope → tools mapping:**
 | Scope | Tools available to researchers |
@@ -136,9 +136,8 @@ Each researcher is EXPLICITLY assigned their angle to prevent convergence.
 
 ## Phase 2: Fan-Out — Researcher Deployment
 
-**CRITICAL: Spawn ALL N researcher agents in a SINGLE message.**
-This is not sequential — every researcher runs in parallel.
-Use the Agent tool N times in one response, each with a distinct prompt.
+**Spawn all N researcher agents in a SINGLE message** (parallel, not sequential).
+Use the Agent tool N times in one response with model: "sonnet", each with a distinct prompt.
 
 Each researcher prompt follows this template:
 

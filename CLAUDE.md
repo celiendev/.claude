@@ -1,7 +1,5 @@
 # Personal AI Engineering System
 
-Each unit of work must make subsequent units easier — not harder. This system implements Compound Engineering: a four-step loop (Plan, Work, Review, Compound) where the fourth step produces a system that builds features better each time.
-
 ---
 
 ## INTENT & DECISION BOUNDARIES
@@ -73,19 +71,7 @@ Switch modes 2-3 times within a single task. Before each sub-task, ask: "Quick F
 /plan → User reviews PRDs → Approves → /plan-build-test (autonomous) → User tests manually → /ship-test-ensure (autonomous through staging, confirms before prod)
 ```
 
-**How each skill behaves in autonomous mode:**
-
-| Checkpoint | Default autonomous action | Rationale |
-|---|---|---|
-| `/plan-build-test` execution plan | Auto-select "Run all autonomously" | PRD was already reviewed |
-| `/plan-build-test` verification failures | Exhaust retry budget, then report BLOCKED | User checks at end |
-| `/ship-test-ensure` fresh context check | Auto-select "Continue here" | Advisory only |
-| `/ship-test-ensure` deploy timeout (15min) | Wait 10 more minutes, then report BLOCKED | Safe default |
-| `/ship-test-ensure` **production deploy** | **ALWAYS ask user** | Non-negotiable safety gate |
-| `/ship-test-ensure` Lighthouse plateau | Accept current scores after max iterations | Performance, not correctness |
-| `/ship-test-ensure` rollback decision | **ALWAYS ask user** | Destructive action needs human judgment |
-
-Safety invariants autonomous mode does NOT change: Escalation Logic, "Agent NEVER does" column, production deploy confirmation, Anti-Premature Completion Protocol, Verification Integrity.
+Autonomous mode: auto-proceed except **production deploy** (always ask user) and **rollback decisions** (always ask user). Safety invariants unchanged.
 
 ### The Full Pipeline
 
@@ -98,25 +84,11 @@ Safety invariants autonomous mode does NOT change: Escalation Logic, "Agent NEVE
 [/workflow-audit] — Periodic self-audit: reviews model performance, error patterns, rule staleness. Monthly or after 10+ sessions.
 ```
 
-### Skill Selection Decision Tree
-
-```
-"What do I need to do?"
-│
-├─ "Just plan, don't build yet" → /plan
-├─ "Build a feature / fix a bug" → Quick Fix if trivial, else /plan-build-test
-├─ "Need deep research or analysis" → /research
-├─ "Ship to production" → /ship-test-ensure
-├─ "Full pipeline" → /plan → review → /plan-build-test → test → /ship-test-ensure
-├─ "Wrap up / capture learnings" → /compound
-├─ "Pending tasks from previous session" → /plan-build-test (Phase 0 resumes)
-└─ "Audit workflow performance" → /workflow-audit
-```
+Skill routing: /plan (PRD only), /plan-build-test (plan+build+test, default entry), /research (deep multi-agent), /ship-test-ensure (CI/CD+prod), /compound (post-task learning), /workflow-audit (periodic audit).
 
 **Project-specific commands** (build, test, lint, deploy, URLs) live in each project's CLAUDE.md under `## Execution Config`.
 
-@rules/sprint-system.md
-@rules/context-engineering.md
+@rules/workflow.md
 
 ---
 
@@ -156,19 +128,8 @@ If during implementation you discover: related bug in different area — log it,
 
 ### Deterministic Safety via Hooks
 
-The "Agent NEVER does" column is enforced as PreToolUse hooks in `~/.claude/settings.json`, not just prompt suggestions. What hooks actually enforce:
-
-- **PreToolUse(Bash):** Block destructive commands and detect proot environment. Package manager enforcement is project-aware (only blocks npm if pnpm-lock.yaml exists). Also validates documentation is updated when pushing workflow repo changes (`check-docs-updated.sh`).
-- **PreToolUse(Write|Edit):** TDD enforcement — blocks production code edits if no corresponding test file exists (`check-test-exists.sh`). Language-universal: supports TS/JS, Python, Go, Rust, Ruby, Java, Kotlin, Elixir, Swift, Dart, C#, Scala, C/C++, Haskell, Zig. Write the test first.
-- **PostToolUse(Write|Edit):** Auto-formats code files using the detected formatter for the file's language. Then verifies INVARIANTS.md rules — blocks if any machine-verifiable invariant is violated (`check-invariants.sh`).
-- **Stop:** Runs end-of-turn-typecheck. cleanup-artifacts (moves stray media to .artifacts/). cleanup-worktrees (prunes stale worktrees, removes merged sprint branches — NEVER deletes unmerged). compound reminder — blocks if PRD tasks complete but /compound not run. Enforces Anti-Premature Completion Protocol — blocks if task marked complete without verification evidence (`verify-completion.sh`).
-- **PreCompact:** Auto-saves session state (task progress, key decisions) to session-learnings file.
-- **PostCompact:** Auto-restores state from session-learnings after compaction.
-- **SessionStart:** Auto-detects proot environment, loads session-learnings, checks for pending tasks.
-- **Notification:** Desktop alert when agent needs attention (no-op in proot)
-
-- **Hard block** (`deny()` — cannot override): `rm -rf /`, `rm -rf` on system dirs, `dd`, fork bombs
-- **Soft block** (`SOFT_BLOCK_APPROVAL_NEEDED` — interactive approval): destructive git (force push, reset --hard, branch -D, etc.), package manager mismatch (npm when pnpm-lock.yaml exists)
+Hooks enforce the "Agent NEVER does" column at tool-call time. Hard blocks (deny): `rm -rf /`, `dd`, fork bombs. Soft blocks (interactive approval): destructive git, package-manager mismatch, 4th direct file read, heavy build/test commands.
+Implementation: `~/.claude/hooks/`. Test: `bash ~/.claude/hooks/tests/run-all.sh`.
 
 ### Soft Block Interactive Approval Protocol
 
@@ -178,9 +139,19 @@ When a hook returns `SOFT_BLOCK_APPROVAL_NEEDED:` prefix: present reason to user
 
 ## MODEL ASSIGNMENT & DELEGATION
 
-Use the right model and delegate aggressively to subagents. The main agent is an **orchestrator**, not a worker — its context is precious. Wrong-model selection wastes tokens and degrades quality. This is not optional.
+The main agent is an **orchestrator**, not a worker. It MUST keep its context clean by delegating all work to subagents.
 
-### Task → Model Matrix
+### Context Budget & Autocompact (HARD RULE — per-window targets)
+
+| Window size | Compact target   | `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` |
+| ----------- | ---------------- | --------------------------------- |
+| 128K        | **100K tokens**  | `78`                              |
+| 200K        | **125K tokens**  | `62`                              |
+| 1M          | **150K tokens**  | `15`                              |
+
+`SessionStart` hook auto-detects window size and verifies/corrects the env var. Manual override: `~/.claude/set-compact.sh <128k|200k|1m|status>`.
+
+### Task → Model Matrix (HARD RULE)
 
 | Task Type                                      | Model    |
 | ----------------------------------------------- | -------- |
@@ -191,34 +162,34 @@ Use the right model and delegate aggressively to subagents. The main agent is an
 | Bug fix implementation                          | `sonnet` |
 | Test writing                                    | `sonnet` |
 | Verification & regression scan                  | `sonnet` |
-| Sprint orchestration (deterministic checklist)  | `sonnet` |
+| Sprint orchestration (deterministic checklist)  | `opus`   |
 | Complex/multi-file refactoring                  | `opus`   |
 | Architectural decisions                         | `opus`   |
 | Merge conflict resolution (>3 files)            | `opus`   |
 
-Model defaults live in each agent's frontmatter. Override via the `model` parameter on the Agent tool when the task type warrants it.
+**NEVER use `opus` for sprint-executor or code-reviewer agents.** Sprint-executor uses `sonnet`. Code-reviewer uses `sonnet`. Model defaults live in each agent's frontmatter.
 
-### Subagent Delegation (mandatory, not optional)
+### Subagent Delegation (HARD RULE)
 
 **ALWAYS delegate to a subagent when:**
 
-- **File scanning / dependency analysis** (finite, structured — count files, extract imports, find symbols, glob-and-read patterns) → `Explore` agent with `model: "haiku"`
-- **Open-ended codebase investigation** (unknown scope, requires reasoning across multiple rounds) → `Explore` agent with `model: "sonnet"`
-- **Reading >5 files** to answer a question → pick haiku or sonnet per the two rules above
+- **File scanning / dependency analysis** → `Explore` agent with `model: "haiku"`
+- **Open-ended codebase investigation** → `Explore` agent with `model: "sonnet"`
+- **Reading >3 files** to answer a question → pick haiku or sonnet per the two rules above. Hook-enforced: 4th direct read is soft-blocked.
+- **Running any build / test / lint / typecheck / install command** → sub-agent. Hook-enforced: `pnpm build`, `cargo test`, `pytest`, `tsc`, `make test`, etc. are soft-blocked in the main agent. Dev servers remain allowed.
 - **Executing a sprint** with declared file boundaries → `sprint-executor` (sonnet, `isolation: worktree`)
 - **Reviewing code** after sprint implementation → `code-reviewer` (sonnet, read-only)
-- **Managing a PRD with multiple sprints** → `orchestrator` (sonnet)
-- **Deep multi-perspective research** → `/research` skill (N sonnet researchers + 1 opus synthesizer)
+- **Managing a PRD with multiple sprints** → `orchestrator` (opus)
+- **Deep multi-perspective research** → `/research` skill
 - **Merge conflicts across >3 files** → opus agent
-
-**Enforcement:** If you catch yourself reading more than 5 files in sequence without delegating, STOP and spawn a subagent. The cue to watch for: "I just need to check a few more files to understand X" — that's the trigger to delegate. The main agent's context is finite; haiku/sonnet subagents have their own context and return only a summary.
 
 **What stays in the main agent (do NOT delegate):**
 
-- Playwright MCP browser interaction (`browser_navigate`, `browser_snapshot`, `browser_console_messages`, etc.) — browser state must stay with the orchestrator
+- Playwright MCP browser interaction — browser state must stay with the orchestrator
 - Simple file edits (checkboxes, session-learnings, single-line fixes)
-- Bug investigation reading ≤5 targeted files
-- Direct file reads when the target path is already known
+- Bug investigation reading ≤3 targeted files (4th triggers the hook)
+- Direct file reads when path is known AND file is under `~/.claude/`, a task spec, or `progress.json`
+- Approving soft-blocks via `approve.sh` (wrap in AskUserQuestion — never tell user to run it manually)
 
 ### Adaptation
 
@@ -264,80 +235,24 @@ When a fix makes things worse, **stop layering fixes on top of broken fixes**: r
 - NEVER claim a command "passed" without running it and seeing the output
 - NEVER write "lint: PASS" without a preceding lint command execution
 - If a verification step is blocked: mark it as `BLOCKED`, never as `PASS`
-- "Trust but verify" does not apply — VERIFY, period
 
 ### Anti-Premature Completion Protocol
 
-**This protocol exists because of repeated incidents where tasks were declared "complete" while the actual running application was broken. It is non-negotiable.**
+Before ANY completion claim (hook-enforced by `verify-completion.sh`):
 
-#### The Three Completion Lies (never do these)
+1. Re-read the plan/spec — actually read the file, not from memory
+2. List every unchecked `- [ ]` item explicitly
+3. Cite evidence for each criterion: "[command] returned [output]"
+4. Start dev server — verify key routes serve correct content
+5. Test as the user (non-admin), not as the builder
+6. Write completion evidence marker
 
-1. **"All tests pass"** — Tests can pass while the first route shows a visible bug, the dev server cache is corrupted, or runtime dependencies are missing. Necessary condition, not sufficient.
-2. **"Build complete"** — A build completing does NOT mean the app runs. You MUST start the dev server and verify actual routes return correct content.
-3. **"All items done"** — Claiming completion without re-reading the original plan is the most common failure.
+Never claim "complete" if: dev server won't start, tests pass but no visual verify, only tested as admin, original plan not re-read.
 
-#### Mandatory Completion Checklist (before ANY completion claim)
+### End-of-Task Browser Verification
 
-1. **Re-read the original plan/spec** — not from memory, actually read the file
-2. **Enumerate remaining items** — list every unchecked `- [ ]` item explicitly
-3. **Cite evidence for each criterion** — "criterion X verified by [command] which returned [output]"
-4. **Start the dev server** — verify it starts and key routes serve correct content
-5. **Test as the user, not the builder** — non-privileged/non-admin accounts
-6. **If ANY item is incomplete** — report it as incomplete. NEVER claim completion with unfinished items.
-7. **Write completion evidence** — evidence marker file for `verify-completion.sh` Stop hook
-
-#### When to STOP and Report Instead of Claiming Done
-
-- Dev server won't start → BLOCKED, not "complete with known issue"
-- Tests pass but haven't visually verified → NOT DONE
-- Checked off tasks but didn't re-read plan → NOT DONE
-- Only tested as admin/superuser → NOT DONE
-
-### End-of-Task Browser Verification (mandatory for UI/API/server work)
-
-Extension of the Anti-Premature Completion Protocol — not a replacement. Before claiming ANY task complete that touched UI, API routes, or server-side code, you MUST run this verification loop with Playwright.
-
-**When this applies:**
-- Frontend components, pages, or styles modified
-- API routes created/modified (REST, GraphQL, tRPC, Next.js API handlers, server actions)
-- Server-side logic (Next.js middleware, SSR, streaming, RSC)
-- Database queries that flow to the UI
-- Config changes that affect runtime behavior (next.config, middleware config, env vars)
-
-**When this does NOT apply:**
-- Pure documentation changes
-- Test-only changes (but still run the tests)
-- Standalone scripts with no UI/API surface
-- Build tool/lint config that does not affect runtime output
-
-**The Protocol:**
-
-1. **Start the dev server** — `pnpm dev` (or the project-specific command from the project's CLAUDE.md `## Execution Config`). Wait until the server reports ready. Keep the server log visible — you will check it.
-2. **Open Playwright** — Use `mcp__plugin_playwright_playwright__browser_navigate` to the first affected route. Playwright MCP interaction stays in the main agent, never delegated to a subagent.
-3. **Take a screenshot** — `browser_take_screenshot` saved under `.artifacts/playwright/screenshots/YYYY-MM-DD_HHmm/<route>_<step>.png`.
-4. **Check the browser console** — Call `browser_console_messages`. Classify every message:
-   - **ERROR** → MUST fix. App is broken or about to break.
-   - **WARN** → MUST fix unless genuinely third-party and unavoidable (document the exception in session-learnings).
-   - **LOG / DEBUG / INFO** → Remove stray `console.log` / `console.debug` statements introduced by this task. Production code does not ship debug output.
-5. **Check the server console** — Read the dev server output. Look for:
-   - Next.js compilation errors or warnings
-   - Runtime exceptions, unhandled rejections, module-not-found
-   - Hydration mismatches, React key warnings, invalid hook calls, effect cleanup warnings
-   - API route 500s, Prisma/ORM errors, server action failures
-   - Middleware errors, edge runtime warnings
-6. **Navigate every affected route** — Repeat steps 3-5 for each. Include at least one end-to-end user flow (click, submit, navigate) that exercises the feature.
-7. **Fix every error found** — After any fix, loop back to step 1 (some changes require a dev server restart). Do NOT mark the task complete until **both consoles are clean**.
-8. **Save final artifacts** — Final screenshots go to `.artifacts/playwright/screenshots/YYYY-MM-DD_HHmm/` with descriptive filenames (`<route>_final.png`). These serve as evidence for the Stop hook's completion check.
-
-**Failure modes (STOP and report, do not paper over):**
-- Dev server won't start → BLOCKED. Investigate the server log, do not claim completion.
-- Playwright can't navigate (route 404/500) → the routing is broken. Fix before continuing.
-- Same errors keep reappearing after fixes → ROLLBACK per the Rollback & Recovery Protocol (stop layering fixes on broken fixes).
-- Console has errors from code you didn't touch → investigate. If pre-existing, log in session-learnings and escalate to the user. Do not suppress errors just to make your task look clean.
-
-**Completion evidence required in the final report:**
-- At least one screenshot in `.artifacts/playwright/screenshots/` from the current session
-- A statement naming each route verified and confirming both consoles were clean
+Required for UI/API/server changes. Start dev server → Playwright navigate → screenshot to `.artifacts/playwright/screenshots/YYYY-MM-DD_HHmm/` → check browser AND server console → fix all errors → repeat. Both consoles must be clean before claiming done.
+Full protocol: `~/.claude/docs/on-demand/browser-verification.md`.
 
 ### Post-Implementation Checklist
 
@@ -371,7 +286,5 @@ All generated artifacts go to `.artifacts/{category}/YYYY-MM-DD_HHmm/`. Categori
 **Update when:** New route, new component/package, architecture change, new env var, new command, significant dependency change, deployment process change.
 **Skip when:** Minor CSS/copy, internal refactors, test-only changes, patch updates.
 
-@rules/evaluation.md
-@rules/session-learnings.md
-@rules/self-improvement.md
-@rules/proot-environment.md
+@rules/quality.md
+@rules/environment.md

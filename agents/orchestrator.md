@@ -5,10 +5,12 @@ description: >
   PRD with multiple sprints, when sprint coordination is needed, or when the
   user says "orchestrate", "run the sprints", "execute the PRD". Manages
   sprint delegation, coherence checks, and completion verification.
-model: sonnet
+model: opus
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent
 permissionMode: default
 ---
+
+**MODEL CONSTRAINT: This agent ALWAYS uses `opus`. Orchestration requires high judgment — opus handles sprint coordination, merge decisions, coherence checks, and completion verification.**
 
 # Orchestrator: Deterministic Sprint Executor
 
@@ -187,7 +189,7 @@ Map each sprint ID to its branch name (returned in the agent result).
 script to detect files that may be silently overwritten:
 ```bash
 # Collect SHAs of previously merged sprints in this batch
-bash ~/.claude/hooks/verify-worktree-merge.sh <worktree-branch> HEAD <prev-sprint-shas...>
+bash ~/.claude/hooks/scripts/verify-worktree-merge.sh <worktree-branch> HEAD <prev-sprint-shas...>
 ```
 If the script reports potential overwrites, note the files for manual verification after merge.
 
@@ -293,27 +295,13 @@ After merge and code review (or after single sprint completes):
 
 ### Step 8: Dev Server Smoke Test (Content-Verified)
 
-**HTTP 200 is necessary but NOT sufficient. You must verify actual page content.**
+Full protocol: `~/.claude/docs/on-demand/dev-server-protocol.md`
 
-1. Run kill command to stop running processes
-2. Start dev server using dev command from Execution Config (in background)
-3. Wait up to 60 seconds for server to be ready (curl the root URL)
-4. If dev server starts, for each of 3-5 representative routes:
-   a. Curl the route — must return HTTP 200
-   b. **Inspect the response body** — verify it contains expected content:
-      - Key text/headings that should be on the page
-      - Absence of error messages ("Internal Server Error", "500", stack traces)
-      - Absence of empty body or loading-only state
-   c. If using Playwright MCP: use `browser_snapshot` to capture the accessibility tree
-      and verify rendered components match expectations
-5. If dev server fails to start:
-   a. Read the error output
-   b. FIX the root cause (do NOT skip — try removing --turbopack, patching system calls, etc.)
-   c. Retry up to 3 times with different fixes each time
-   d. If still failing: mark sprint as BLOCKED. Do NOT proceed.
-6. Kill dev server after smoke test
-7. **NEVER mark a sprint complete if the dev server won't start.**
-8. **NEVER mark a sprint complete if routes return 200 but contain error content.**
+Summary: run kill command → start dev server (background, log to file) → poll log up to 60s
+for ready signal → curl 3-5 representative routes, verify HTTP 200 AND no error content in
+body → max 3 fix-retry cycles with a different fix each time → kill server → mark BLOCKED if
+still failing after 3 cycles. NEVER mark a sprint complete if the dev server won't start or
+if routes return 200 with error content.
 
 **NOTE: Full E2E/Playwright testing is handled by the plan-build-test Phase 5 (Live Verification)
 after ALL batches complete. The orchestrator does a content-verified smoke test to catch
@@ -396,15 +384,7 @@ Return structured completion report to caller:
 
 ## Dev Server Failure Protocol
 
-If the dev server fails to start:
-
-1. **Diagnose:** Read error output. Common: port in use → kill and retry; missing deps → install; config error → fix
-2. **Retry:** Max 3 attempts with fixes between each
-3. **If still failing after 3:**
-   - Update progress.json: `"status": "blocked"`
-   - Do NOT mark acceptance criteria as met
-   - Return to caller with BLOCKED status
-4. **NEVER mark a sprint complete if dev server won't start.**
+See `~/.claude/docs/on-demand/dev-server-protocol.md` (Section 5: Fix-Retry Cycle and Section 7: BLOCKED Condition) for the full failure handling procedure. In brief: diagnose root cause → fix → retry, max 3 cycles, different fix each time → if still failing: set `progress.json` status to `"blocked"` and return BLOCKED to caller. NEVER mark a sprint complete if dev server won't start.
 
 ## What the Orchestrator Does NOT Do
 

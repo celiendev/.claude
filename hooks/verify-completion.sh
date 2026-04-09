@@ -23,14 +23,14 @@ if ! command -v jq &>/dev/null; then
   exit 0
 fi
 
+# Source shared stop-guard (fail-open: if missing, guard is a no-op)
+source ~/.claude/hooks/lib/stop-guard.sh 2>/dev/null || true
+
 # Read JSON input from stdin
 INPUT=$(cat)
 
 # Check stop_hook_active — prevent infinite loop
-STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)
-if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
-  exit 0
-fi
+check_stop_hook_active "$INPUT"
 
 # Resolve project directory
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
@@ -68,7 +68,8 @@ if [ "$RECENTLY_COMPLETED" = false ]; then
 fi
 
 # Check for completion evidence marker
-EVIDENCE_MARKER="${HOME}/.claude/state/.claude-completion-evidence-${CLAUDE_SESSION_ID:-unknown}"
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"' 2>/dev/null || echo "unknown")
+EVIDENCE_MARKER="${HOME}/.claude/state/.claude-completion-evidence-${SESSION_ID}"
 
 if [ -f "$EVIDENCE_MARKER" ]; then
   # Verify the evidence file has required fields
