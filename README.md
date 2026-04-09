@@ -122,12 +122,12 @@ The system uses deterministic hooks — real code that runs before/after every a
 | `end-of-turn-typecheck.sh` | Session end | Static type checking (tsc, cargo check, go vet, mypy, pyright, etc.) |
 | `compound-reminder.sh` | Session end | Blocks exit without learning capture |
 | `verify-completion.sh` | Session end | Blocks premature completion without evidence |
-| `validate-i18n-keys.sh` | Pre-commit (via ship-test-ensure) | Cross-validates all i18n t() keys exist in all locale files |
-| `verify-worktree-merge.sh` | Post-merge (via orchestrator) | Detects files silently overwritten by worktree merges |
+| `scripts/validate-i18n-keys.sh` | Pre-commit (via ship-test-ensure) | Cross-validates all i18n t() keys exist in all locale files |
+| `scripts/verify-worktree-merge.sh` | Post-merge (via orchestrator) | Detects files silently overwritten by worktree merges |
 | `check-docs-updated.sh` | Every `git push` (PreToolUse) | Blocks push if hooks/skills/agents changed without doc updates |
-| `proot-preflight.sh` | First Bash command per session | Detects proot-distro ARM64, sets env vars, language-aware warnings |
-| `worktree-preflight.sh` | Orchestrator step 0 | Detects project languages, installs deps per-language in worktrees |
-| `validate-sprint-boundaries.sh` | After sprint extraction | Validates no file conflicts between parallel sprints |
+| `session-start.sh` | SessionStart | Detects proot-distro ARM64, warns about issues, loads session state |
+| `scripts/worktree-preflight.sh` | Orchestrator step 0 | Detects project languages, installs deps per-language in worktrees |
+| `scripts/validate-sprint-boundaries.sh` | After sprint extraction | Validates no file conflicts between parallel sprints |
 
 All hooks auto-detect the project's language(s) via `hooks/lib/detect-project.sh`. Adding support for a new language means updating one file — see [Universal Workflow Guide](docs/universal-workflow-guide.md).
 
@@ -167,13 +167,14 @@ The system includes a self-test suite (`test-workflow-mods/run-tests.sh`) with 1
 │   ├── end-of-turn-typecheck.sh # Static type checking (all langs)
 │   ├── compound-reminder.sh   # Blocks session end without learning capture
 │   ├── verify-completion.sh   # Blocks premature completion claims
-│   ├── validate-i18n-keys.sh  # Cross-validates i18n keys across locales
-│   ├── verify-worktree-merge.sh # Detects silent overwrites in worktree merges
 │   ├── check-docs-updated.sh # Blocks push if workflow changed without doc updates
-│   ├── proot-preflight.sh    # First-command session setup for proot-distro
-│   ├── worktree-preflight.sh # Language-aware worktree dependency setup
-│   ├── retry-with-backoff.sh # Retry helper for external API calls
-│   └── validate-sprint-boundaries.sh # Validates sprint file boundaries
+│   ├── scripts/               # Utility scripts called by skills/agents
+│   │   ├── approve.sh         # Soft-block approval mechanism
+│   │   ├── retry-with-backoff.sh # Retry helper for external API calls
+│   │   ├── validate-i18n-keys.sh # Cross-validates i18n keys across locales
+│   │   ├── validate-sprint-boundaries.sh # Validates sprint file boundaries
+│   │   ├── verify-worktree-merge.sh # Detects silent overwrites in worktree merges
+│   │   └── worktree-preflight.sh # Language-aware worktree dependency setup
 ├── test-workflow-mods/# Workflow integrity test suite (266 assertions)
 │   ├── run-tests.sh           # Validates entire ~/.claude/ structure
 │   └── testdata/              # Fixture projects for hook behavioral tests

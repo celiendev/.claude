@@ -3,7 +3,8 @@
     "ENABLE_LSP_TOOL": "1",
     "NODE_OPTIONS": "--max-old-space-size=2048",
     "CHOKIDAR_USEPOLLING": "true",
-    "WATCHPACK_POLLING": "true"
+    "WATCHPACK_POLLING": "true",
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "62"
   },
   "permissions": {
     "allow": [
@@ -45,6 +46,10 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/check-invariants.sh"
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/scan-secrets.sh"
           }
         ]
       }
@@ -85,11 +90,11 @@
           },
           {
             "type": "command",
-            "command": "~/.claude/hooks/proot-preflight.sh"
+            "command": "~/.claude/hooks/check-docs-updated.sh"
           },
           {
             "type": "command",
-            "command": "~/.claude/hooks/check-docs-updated.sh"
+            "command": "~/.claude/hooks/block-heavy-bash.sh"
           }
         ]
       },
@@ -99,6 +104,25 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/check-test-exists.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Grep|Glob|Bash|Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/enforce-delegation.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/reset-delegation-counter.sh"
           }
         ]
       }
@@ -162,6 +186,6 @@
     "skill-creator@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {},
-  "skipDangerousModePermissionPrompt": true,
-  "effortLevel": "high"
+  "effortLevel": "high",
+  "skipDangerousModePermissionPrompt": true
 }

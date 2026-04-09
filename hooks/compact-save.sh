@@ -8,8 +8,6 @@ trap 'echo "HOOK CRASH: $0 line $LINENO" >&2; exit 0' ERR
 
 source "${HOME}/.claude/hooks/lib/hook-logger.sh" 2>/dev/null || true
 
-INPUT=$(cat)
-
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 

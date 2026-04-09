@@ -39,63 +39,9 @@ through staging, confirms before prod). See CLAUDE.md "Autonomous Pipeline" for 
 
 ## Execution Config Dependency
 
-This skill reads project-specific configuration from the project's `CLAUDE.md` under an `## Execution Config` section. The config must provide these values (YAML-like keys):
+This skill reads project-specific configuration from the project's `CLAUDE.md` under an `## Execution Config` section. Required keys: `build_command`, `test_command`, `lint_command`, `typecheck_command`, `kill_command`, `e2e_command`, `package_manager`, `github_repo`, `staging_urls`, `production_urls`, `deploy_commands` (with `staging_trigger` and `production` list), `pages_to_audit`, and `app_detection_paths`. Optional: `staging_credentials`, `e2e_staging`, `e2e_production`, `lighthouse_threshold`, `psi_api_key`.
 
-```yaml
-# Commands
-build_command: "..." # e.g., pnpm turbo build
-test_command: "..." # e.g., pnpm turbo test
-lint_command: "..." # e.g., pnpm exec biome check .
-typecheck_command: "..." # e.g., pnpm turbo check-types
-kill_command: "..." # e.g., pkill -f "next-server|next start|next dev" 2>/dev/null
-e2e_command: "..." # e.g., pnpm exec playwright test tests/
-package_manager: "..." # e.g., pnpm — used in agent prompts for "use X exclusively"
-
-# GitHub
-github_repo: "org/repo" # e.g., mycompany/myapp — used for all gh commands
-
-# URLs
-staging_urls:
-  - name: "App Name"
-    url: "https://staging.example.com"
-production_urls:
-  - name: "App Name"
-    url: "https://example.com"
-
-# Staging credentials (optional — omit if staging has no auth gate)
-staging_credentials:
-  env_var: "ENV_VAR_NAME=value" # e.g., STAGING_PASSWORD=secret123
-
-# Deploy
-deploy_commands:
-  staging_trigger: "auto" # "auto" = push to main triggers staging, or explicit command
-  production:
-    - name: "App Deploy"
-      command: 'gh workflow run "App Deploy" --repo org/repo -f stage=production'
-
-# E2E overrides per environment (optional — uses e2e_command + BASE_URL if not set)
-e2e_staging:
-  - name: "App E2E"
-    command: "BASE_URL=https://staging.example.com pnpm exec playwright test tests/"
-e2e_production:
-  - name: "App E2E"
-    command: "BASE_URL=https://example.com pnpm exec playwright test tests/"
-
-# PageSpeed pages to audit
-pages_to_audit:
-  - "https://example.com/"
-  - "https://example.com/about"
-  - "https://example.com/pricing"
-
-# App detection (how to categorize changed files into apps)
-app_detection_paths:
-  - name: "app1"
-    paths: ["apps/app1/", "packages/shared/"]
-  - name: "app2"
-    paths: ["apps/app2/", "packages/shared/"]
-```
-
-The format above is illustrative (YAML-like). The actual project CLAUDE.md may use markdown tables, key-value pairs, or other formats. Parse whatever format is present — the keys and values matter, not the syntax.
+The format is flexible (YAML-like, markdown tables, key-value). Parse whatever is present — keys and values matter, not syntax.
 
 If `## Execution Config` is missing from the project CLAUDE.md, **STOP** and ask the user to add it before proceeding.
 
@@ -152,7 +98,7 @@ Before committing, ensure local checks pass. Spawn a **sonnet agent**:
 > 3. `{typecheck_command}` (type checking)
 > 4. `{build_command}` (build)
 > 5. `{test_command}` (unit tests)
-> 6. `bash ~/.claude/hooks/validate-i18n-keys.sh .` (i18n key validation — auto-skips if project has no i18n)
+> 6. `bash ~/.claude/hooks/scripts/validate-i18n-keys.sh .` (i18n key validation — auto-skips if project has no i18n)
 >
 > If any step fails, report: which step, the error, and affected files.
 > Return: pass/fail per step, error details if any.
@@ -262,19 +208,7 @@ git pull --ff-only origin main
 
 ### Step 1.4: Save Pipeline State
 
-Update the session learnings file with:
-
-```markdown
-## Ship Pipeline State
-
-- **Started:** [timestamp]
-- **Apps:** [detected app names]
-- **Branch:** [branch name]
-- **PR:** [PR number/URL]
-- **Commit:** [SHA]
-- **Pre-deploy SHA:** [main SHA before merge]
-- **Phase:** 1 complete — PR merged to main via CI/CD
-```
+Update the session learnings file with a `## Ship Pipeline State` block recording: timestamp, apps, branch, PR number/URL, commit SHA, pre-deploy SHA, and current phase.
 
 ---
 
@@ -329,12 +263,7 @@ If any workflow fails:
 
 ### Step 2.4: Confirm Staging Deploy Success
 
-All workflows must show green. Update pipeline state:
-
-```markdown
-- **Phase:** 2 complete — staging deployed
-- **[App Name] Staging Run:** #[ID] SUCCESS
-```
+All workflows must show green. Update the `## Ship Pipeline State` in session learnings: phase 2 complete, run IDs and SUCCESS status for each app.
 
 ---
 
@@ -369,12 +298,7 @@ If tests fail:
 
 ### Step 3.3: Confirm E2E Pass
 
-All tests must pass. Update pipeline state:
-
-```markdown
-- **Phase:** 3 complete — staging E2E passed
-- **[App Name] E2E:** [N] passed, [0] failed
-```
+All tests must pass. Update the `## Ship Pipeline State` in session learnings: phase 3 complete, E2E pass/fail counts per app.
 
 ---
 
@@ -420,12 +344,7 @@ Same fix loop as Phase 2.3, but with extra caution:
 
 ### Step 4.5: Confirm Production Deploy Success
 
-Update pipeline state:
-
-```markdown
-- **Phase:** 4 complete — production deployed
-- **[App Name] Prod Run:** #[ID] SUCCESS
-```
+Update the `## Ship Pipeline State` in session learnings: phase 4 complete, run IDs and SUCCESS status for each app.
 
 ---
 
@@ -590,36 +509,7 @@ Some audits may be impossible to fix to 100 (e.g., third-party scripts, CDN late
 
 ### Step 6.1: Final Score Report
 
-```
-## Ship & Verify Complete
-
-### Pipeline Summary
-- Commit: [SHA]
-- Push → Staging Deploy: [duration]
-- Staging E2E: [N] tests passed
-- Production Deploy: [duration]
-- PageSpeed Iterations: [N]
-
-### Final Lighthouse Scores (Production)
-
-| Page | Strategy | Perf | A11y | BP | SEO |
-|------|----------|------|------|-----|-----|
-| /    | mobile   | 100  | 100  | 100 | 100 |
-| /    | desktop  | 100  | 100  | 100 | 100 |
-| ...  | ...      | ...  | ...  | ...  | ... |
-
-### Core Web Vitals
-- LCP: [value] (target: < 2s)
-- CLS: [value] (target: < 0.1)
-- TBT: [value] (target: < 200ms)
-
-### Fix Iterations
-- Iteration 1: [what was fixed, score change]
-- Iteration 2: [what was fixed, score change]
-
-### Files Modified (total across all iterations)
-- [file list with change summary]
-```
+Present the final report using the template in `~/.claude/skills/ship-test-ensure/refs/final-report-template.md`.
 
 ### Step 6.2: Compound Knowledge
 
@@ -647,19 +537,7 @@ a destructive action that requires human judgment.
    > Pre-deploy SHA: `{PRE_DEPLOY_SHA}`
    > Options: **Revert and redeploy** | **Continue fixing** | **Accept current state**
 
-2. If user chooses revert:
-   ```bash
-   git checkout main && git pull origin main
-   git checkout -b revert/rollback-$(date +%Y%m%d-%H%M)
-   # Revert ALL commits since pre-deploy SHA (not just HEAD)
-   git revert --no-edit ${PRE_DEPLOY_SHA}..HEAD
-   git push -u origin HEAD
-   gh pr create --repo {github_repo} --title "revert: rollback to pre-deploy state" \
-     --body "Automated rollback via /ship-test-ensure. Reverts all commits since ${PRE_DEPLOY_SHA}."
-   # Ask user: merge here or on GitHub? (same pattern as Step 1.3)
-   # If user approves: gh pr merge --squash --delete-branch --repo {github_repo}
-   # Follow deploy to confirm rollback succeeded
-   ```
+2. If user chooses revert: create a `revert/rollback-TIMESTAMP` branch, run `git revert --no-edit ${PRE_DEPLOY_SHA}..HEAD` to revert all commits since the pre-deploy SHA, push and create a PR via `gh pr create`, merge via the same pattern as Step 1.3, then follow the deploy to confirm rollback succeeded.
 
 3. Log the rollback in session-learnings and error-registry
 

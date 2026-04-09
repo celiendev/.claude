@@ -189,6 +189,11 @@ if [ -n "$five_pct" ] || [ -n "$week_pct" ]; then
     progress_bar "$week_int" 10 "$week_col"
     printf '  %s%d%%%s' "$W" "$week_int" "$N"
     [ -n "$week_resets" ] && printf ' %s(%s)%s' "$D" "$(fmt_resets "$week_resets")" "$N"
+    # extra-usage bar: always shown alongside the 7d bar.
+    # Maps 0-100% into 8 cells so it's always visible.
+    extra_width=8
+    printf '  %sExtra Usage%s ' "$M" "$N"
+    progress_bar "$week_int" "$extra_width" "$M"
   else
     printf '%s7d    —%s' "$D" "$N"
   fi

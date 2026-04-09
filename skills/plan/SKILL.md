@@ -30,7 +30,7 @@ context: fork
      f. Fill "Context Loaded" section with what you learned from docs
      g. Write PRD using appropriate template (read from `~/.claude/skills/plan/prd-template-minimal.md` for Standard, `~/.claude/skills/plan/prd-template-full.md` for PRD+Sprint)
      h. Run **Spec Self-Evaluator** — spawn a **separate haiku agent** (different context = different perspective) to evaluate the spec:
-        > Read `~/.claude/docs/evaluation-reference.md` for the 14-point Spec Self-Evaluator checklist AND the Cross-Section Validation checks.
+        > Read `~/.claude/docs/on-demand/evaluation-reference.md` for the 14-point Spec Self-Evaluator checklist AND the Cross-Section Validation checks.
         > Then read the PRD at [spec.md path].
         > Phase 1: Score each of the 14 per-section criteria as PASS or FAIL with a brief reason.
         > Phase 2: Run the 3 cross-section validation checks:
@@ -41,94 +41,15 @@ context: fork
         Must score 11+ out of 14 AND have zero cross-section contradictions to proceed. If below threshold: revise the PRD, then re-evaluate.
         Using a separate agent prevents the author from grading their own homework.
 
-4. **If PRD+Sprint — Extract Sprint Specs (MANDATORY):**
+4. **If PRD+Sprint — Extract Sprint Specs, INVARIANTS.md, and Build Candidate (MANDATORY):**
 
-   After writing `spec.md`, extract each sprint into its own file. This is the critical step that enables context isolation.
+   Sprint extraction protocol: `~/.claude/skills/plan/sprint-extraction-protocol.md`
 
-   a. Create `sprints/` subdirectory inside the PRD directory
-   b. For each sprint in the Sprint Decomposition:
-   - Create `sprints/NN-title.md` using the sprint spec template (`~/.claude/skills/plan/sprint-spec-template.md`)
-   - Copy the sprint's objective, tasks, acceptance criteria, verification into the spec file
-   - **Determine file boundaries** by analyzing the tasks:
-     - `files_to_create`: new files this sprint builds
-     - `files_to_modify`: existing files this sprint can touch
-     - `files_read_only`: files to reference but NOT modify
-     - `shared_contracts`: interfaces/types from the PRD's Shared Contracts section
-   - **Validate no file conflicts**: if two sprints in the same batch both list a file under `files_to_modify` or `files_to_create`, they CANNOT be parallel — move one to a later batch
-   - Include relevant context from the PRD (design details, API specs) but NOT the entire PRD
-     c. Create `progress.json` with initial state:
+   Summary: create `sprints/NN-title.md` per sprint (self-contained, includes file boundaries)
+   → create `progress.json` (schema in protocol doc) → create `INVARIANTS.md` (machine-verifiable
+   contracts for cross-cutting concepts) → run `bash ~/.claude/hooks/scripts/validate-sprint-boundaries.sh <prd-dir>`
+   → tag Build Candidate (`git tag "build-candidate/<prd-name>"`). Maximum 5 sprints per PRD.
 
-   ```json
-   {
-     "prd": "spec.md",
-     "created": "[ISO timestamp]",
-     "sprints": [
-       {
-         "id": 1,
-         "file": "sprints/01-title.md",
-         "title": "[Sprint title]",
-         "status": "not_started",
-         "depends_on": [],
-         "batch": 1,
-         "model": "sonnet",
-         "branch": null,
-         "merged": false
-       }
-     ]
-   }
-   ```
+5. Tell the user: "PRD saved at [directory-path]/. Sprint specs extracted to `sprints/`. INVARIANTS.md created. Build Candidate tagged. Run `/plan-build-test` to execute, or review and adjust first."
 
-   d. **Validate sprint count**: maximum 5 sprints. If >5, the scope is too large — split into separate PRDs by independent deliverable (test: "could these be built by teams who never talk?"). If they share files, keep together and reduce scope.
-
-5. **Sprint boundary validation (deterministic — MANDATORY after step 4):**
-
-   Run `~/.claude/hooks/validate-sprint-boundaries.sh <prd-directory>` to verify:
-   - No file appears in `files_to_create`/`files_to_modify` in two parallel sprints (same batch)
-   - Every `files_to_modify` file either exists or is created by an earlier sprint
-   - Sprint dependency graph has no cycles
-   - INVARIANTS.md verify commands reference reachable files
-
-   If validation fails: restructure batches/dependencies to fix violations, then re-run.
-   `files_read_only` can overlap freely — reading is safe.
-
-6. **If PRD+Sprint — Create INVARIANTS.md (MANDATORY):**
-
-   After extracting sprint specs, identify every concept that is defined in one bounded
-   context and consumed by others. Create `INVARIANTS.md` in the PRD directory with
-   machine-verifiable contracts for each cross-cutting concept.
-
-   For each shared concept, define:
-   - **Owner:** Which bounded context defines this concept
-   - **Preconditions:** What consumers must satisfy (caller's obligation)
-   - **Postconditions:** What the owner guarantees (provider's guarantee)
-   - **Invariants:** What must always hold across all contexts
-   - **Verify:** Shell command that exits 0 if invariant holds
-   - **Fix:** How to resolve if violated
-
-   Common concepts to register: permission string formats, entity status vocabularies,
-   error code families, event type definitions, routing identifiers, API contract shapes,
-   shared type definitions.
-
-   **Dependency direction:** If A depends on B, B owns the contract. This prevents
-   consumers from independently inventing expectations about provider behavior.
-
-   Copy the project-level INVARIANTS.md to the project root if one doesn't exist yet.
-
-7. **Tag Build Candidate:**
-
-   After all artifacts are written (spec.md, sprint specs, progress.json, INVARIANTS.md),
-   tag the current state as a Build Candidate — a formal gate declaring "this specification
-   is complete enough to build from."
-
-   ```bash
-   git add docs/tasks/<area>/<category>/<prd-dir>/
-   git commit -m "docs: Build Candidate for <prd-name>"
-   git tag "build-candidate/<prd-name>"
-   ```
-
-   This is analogous to a release candidate, but for the design phase. The tag is the
-   contract: "everything needed to build is specified. Implementation can begin."
-
-8. Tell the user: "PRD saved at [directory-path]/. Sprint specs extracted to `sprints/`. INVARIANTS.md created. Build Candidate tagged. Run `/plan-build-test` to execute, or review and adjust first."
-
-9. **Do NOT execute.** This skill produces the plan only.
+6. **Do NOT execute.** This skill produces the plan only.

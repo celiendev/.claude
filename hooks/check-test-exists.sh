@@ -44,6 +44,7 @@ fi
 
 # Source shared detection library
 source ~/.claude/hooks/lib/detect-project.sh
+source ~/.claude/hooks/lib/approvals.sh 2>/dev/null || true
 source ~/.claude/hooks/lib/hook-logger.sh 2>/dev/null || true
 
 # === SKIP CONDITIONS ===
@@ -102,8 +103,85 @@ fi
 EXT="${FILE_PATH##*.}"
 FILE_LANG=$(lang_for_extension "$EXT")
 
-# Skip if the project has no test infrastructure for this language
+# === NO TEST INFRA: EDUCATIONAL SOFT-BLOCK for production code ===
+#
+# If we reach here, the file IS production code (passed all skip conditions).
+# If the project has no test infrastructure at all, emit an educational soft-block
+# instead of silently passing — but ONLY for files inside recognized production
+# directories (src/, app/, lib/, server/, api/, pages/, etc.) and only when
+# inside a real project (detected by a manifest file walking up).
+#
+is_in_production_dir() {
+  local fp="$1"
+  case "$fp" in
+    # Production directories: trigger educational soft-block
+    */src/*|*/app/*|*/lib/*|*/server/*|*/api/*|*/pages/*) return 0 ;;
+    */pkg/*|*/cmd/*|*/internal/*|*/core/*|*/services/*|*/handlers/*) return 0 ;;
+    */controllers/*|*/models/*|*/views/*|*/components/*|*/features/*) return 0 ;;
+    # Test/doc/config directories: skip
+    */tests/*|*/__tests__/*|*/test/*|*/spec/*) return 1 ;;
+    */docs/*|*/.config/*|*/.claude/*) return 1 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Find project root by walking up from file looking for a manifest
+find_project_root() {
+  local dir
+  dir="$(dirname "$1")"
+  while [ "$dir" != "/" ] && [ "$dir" != "$HOME" ]; do
+    if [ -f "$dir/package.json" ] || [ -f "$dir/Cargo.toml" ] || \
+       [ -f "$dir/go.mod" ] || [ -f "$dir/pyproject.toml" ] || \
+       [ -f "$dir/setup.py" ] || [ -f "$dir/Gemfile" ] || \
+       [ -f "$dir/mix.exs" ] || [ -f "$dir/pom.xml" ] || \
+       [ -f "$dir/build.gradle" ] || [ -f "$dir/build.gradle.kts" ]; then
+      echo "$dir"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
 if ! has_test_infra "$PROJECT_DIR" "$FILE_LANG"; then
+  # Only soft-block if file is in a production directory AND inside a real project
+  if is_in_production_dir "$FILE_PATH"; then
+    DETECTED_ROOT=$(find_project_root "$FILE_PATH") || DETECTED_ROOT=""
+    if [ -n "$DETECTED_ROOT" ]; then
+      # File is inside a real project with no test infra — educational soft-block
+      PENDING_DIR="${HOME}/.claude/hooks/.pending"
+      APPROVAL_DIR="${HOME}/.claude/hooks/.approvals"
+      mkdir -p "$PENDING_DIR" "$APPROVAL_DIR" 2>/dev/null || true
+
+      MSG="No test infrastructure detected (no package.json test script, no pytest.ini, no cargo test, no go test). Production code without tests accumulates risk. Set up tests first, or approve to proceed anyway (valid 5 min)."
+      CMD_HASH=$(printf '%s' "no-test-infra-$FILE_PATH" | cksum 2>/dev/null | cut -d' ' -f1) || CMD_HASH="no-test-infra-fallback"
+
+      # Check for existing approval token (5-min TTL)
+      if [ -f "$APPROVAL_DIR/$CMD_HASH" ]; then
+        APPROVAL_TIME=$(stat -c %Y "$APPROVAL_DIR/$CMD_HASH" 2>/dev/null || echo 0)
+        NOW=$(date +%s)
+        if [ $((NOW - APPROVAL_TIME)) -lt 300 ]; then
+          rm -f "$APPROVAL_DIR/$CMD_HASH" "$PENDING_DIR/$CMD_HASH" 2>/dev/null || true
+          exit 0  # Approved — proceed
+        fi
+        rm -f "$APPROVAL_DIR/$CMD_HASH" 2>/dev/null || true
+      fi
+
+      # Emit soft-block using shared helper if available, else inline
+      if command -v emit_soft_block >/dev/null 2>&1; then
+        emit_soft_block "check-test-exists" "$MSG" "$FILE_PATH" "$PENDING_DIR" "$CMD_HASH"
+      else
+        mkdir -p "$PENDING_DIR" 2>/dev/null || true
+        {
+          printf 'Reason: %s\n' "$MSG"
+          printf 'Command: %s\n' "$FILE_PATH"
+          printf 'Time: %s\n' "$(date -Iseconds 2>/dev/null || date)"
+        } > "$PENDING_DIR/$CMD_HASH" 2>/dev/null || true
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"SOFT_BLOCK_APPROVAL_NEEDED: %s"}}\n' "$MSG"
+        exit 0
+      fi
+    fi
+  fi
   exit 0
 fi
 

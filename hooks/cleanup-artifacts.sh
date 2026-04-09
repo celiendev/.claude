@@ -24,6 +24,9 @@ trap 'echo "HOOK WARNING: cleanup-artifacts.sh crashed at line $LINENO" >&2; exi
 # Source shared logging utility
 source ~/.claude/hooks/lib/hook-logger.sh 2>/dev/null || true
 
+# Source shared stop-guard (fail-open: if missing, guard is a no-op)
+source ~/.claude/hooks/lib/stop-guard.sh 2>/dev/null || true
+
 # ─── CONFIGURATION ─────────────────────────────────────────────────────
 
 HOOK_NAME="cleanup-artifacts"
@@ -53,14 +56,7 @@ else
 fi
 
 # Check stop_hook_active — prevent infinite loop
-STOP_HOOK_ACTIVE="false"
-if command -v jq &>/dev/null; then
-  STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null || echo "false")
-fi
-
-if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
-  exit 0
-fi
+check_stop_hook_active "$INPUT"
 
 # ─── RESOLVE PROJECT DIRECTORY ─────────────────────────────────────────
 

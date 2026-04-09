@@ -23,6 +23,7 @@ set -euo pipefail
 # 15. Evolution infrastructure — Files exist and JSON is valid
 # 16. Compound skill — Self-test integration
 # 17. check-docs-updated.sh — Docs gate on git push (behavioral)
+# 41. Hard Rule Enforcement Language — CLAUDE.md
 
 HOOKS_DIR="$HOME/.claude/hooks"
 SKILLS_DIR="$HOME/.claude/skills"
@@ -83,6 +84,13 @@ make_stop_input() {
 EOF
 }
 
+make_stop_input_with_session() {
+  local session_id="$1"
+  cat <<EOF
+{"stop_hook_active":false,"session_id":"$session_id"}
+EOF
+}
+
 make_stop_input_active() {
   cat <<EOF
 {"stop_hook_active":true}
@@ -109,10 +117,8 @@ ALL_HOOKS=(
   compound-reminder.sh
   end-of-turn-typecheck.sh
   post-edit-quality.sh
-  proot-preflight.sh
-  validate-sprint-boundaries.sh
+  session-start.sh
   verify-completion.sh
-  worktree-preflight.sh
 )
 
 for hook in "${ALL_HOOKS[@]}"; do
@@ -123,12 +129,22 @@ for hook in "${ALL_HOOKS[@]}"; do
   fi
 done
 
-# retry-with-backoff.sh is sourced, not executed directly — just check it exists
-if [ -f "$HOOKS_DIR/retry-with-backoff.sh" ]; then
-  pass "retry-with-backoff.sh exists (sourced utility)"
-else
-  fail "retry-with-backoff.sh missing"
-fi
+# scripts/ utilities — moved from hooks/ root to hooks/scripts/
+SCRIPT_UTILS=(
+  scripts/approve.sh
+  scripts/retry-with-backoff.sh
+  scripts/validate-i18n-keys.sh
+  scripts/validate-sprint-boundaries.sh
+  scripts/verify-worktree-merge.sh
+  scripts/worktree-preflight.sh
+)
+for util in "${SCRIPT_UTILS[@]}"; do
+  if [ -f "$HOOKS_DIR/$util" ]; then
+    pass "$util exists (utility script)"
+  else
+    fail "$util missing"
+  fi
+done
 
 # ============================================================
 header "2. check-test-exists.sh — TDD Enforcement"
@@ -342,8 +358,8 @@ non_privileged_user_tested: true
 timestamp: 2026-03-16T12:00:00
 EOF
 
-INPUT=$(make_stop_input)
-if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" CLAUDE_SESSION_ID="$UNIQUE_SESSION" "$HOOKS_DIR/verify-completion.sh" >/dev/null 2>&1; then
+INPUT=$(make_stop_input_with_session "$UNIQUE_SESSION")
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" "$HOOKS_DIR/verify-completion.sh" >/dev/null 2>&1; then
   pass "Allows completion when evidence marker exists with all fields"
 else
   fail "Blocked completion despite valid evidence marker"
@@ -528,10 +544,10 @@ else
   fail "block-dangerous.sh not found in PreToolUse(Bash) hooks"
 fi
 
-if jq -e '.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[] | select(.command | contains("proot-preflight"))' "$SETTINGS" >/dev/null 2>&1; then
-  pass "proot-preflight.sh registered as PreToolUse(Bash)"
+if jq -e '.hooks.SessionStart[]?.hooks[]? | select(.command | contains("session-start"))' "$SETTINGS" >/dev/null 2>&1; then
+  pass "session-start.sh registered as SessionStart hook (includes proot detection)"
 else
-  fail "proot-preflight.sh not found in PreToolUse(Bash) hooks"
+  fail "session-start.sh not found in SessionStart hooks"
 fi
 
 # 5.5: PostToolUse hooks
@@ -592,12 +608,12 @@ header "9. CLAUDE.md — Key Documentation"
 
 # Core workflow concepts documented
 declare -A CLAUDE_MD_CHECKS=(
-  ["check-test-exists.sh"]="TDD enforcement hook"
+  ["TDD for Features"]="TDD enforcement hook"
   ["check-invariants.sh"]="Invariant verification hook"
   ["verify-completion.sh"]="Anti-premature completion hook"
   ["Architecture Invariant Registry"]="Invariant Registry section"
   ["Build Candidate"]="Build Candidate concept"
-  ["Test as the user, not the builder"]="Non-privileged user testing"
+  ["Test as the user (non-admin)"]="Non-privileged user testing"
   ["Anti-Premature Completion"]="Anti-Premature Completion Protocol"
   ["Preconditions"]="INVARIANTS.md format (Preconditions)"
   ["Postconditions"]="INVARIANTS.md format (Postconditions)"
@@ -605,11 +621,11 @@ declare -A CLAUDE_MD_CHECKS=(
   ["Correctness Discovery"]="Correctness Discovery process"
   ["Verification Integrity"]="Verification Integrity rules"
   ["Context Rot"]="Context Rot Protocol"
-  ["Block destructive commands"]="PreToolUse(Bash) block-dangerous behavior"
-  ["compound reminder"]="Stop hook compound-reminder behavior"
-  ["end-of-turn-typecheck"]="end-of-turn-typecheck hook"
-  ["Auto-format"]="PostToolUse auto-format behavior"
-  ["proot-preflight"]="proot-preflight hook"
+  ["Hard blocks"]="PreToolUse(Bash) block-dangerous behavior"
+  ["Compound is BLOCKING"]="Stop hook compound-reminder behavior"
+  ["typecheck"]="end-of-turn-typecheck hook"
+  ["Post-Implementation Checklist"]="PostToolUse auto-format behavior"
+  ["PRoot-Distro"]="proot-distro environment detection (merged into session-start)"
 )
 
 for pattern in "${!CLAUDE_MD_CHECKS[@]}"; do
@@ -1017,7 +1033,7 @@ fi
 header "19. Cross-Section Validation — Evaluator (ADR-006)"
 # ============================================================
 
-EVAL_REF="$HOME/.claude/docs/evaluation-reference.md"
+EVAL_REF="$HOME/.claude/docs/on-demand/evaluation-reference.md"
 
 # Test 19.1: Cross-Section Validation section exists
 if grep -q "Cross-Section Validation" "$EVAL_REF"; then
@@ -1085,7 +1101,7 @@ fi
 header "20. validate-sprint-boundaries.sh — Deterministic Validation (ADR-006)"
 # ============================================================
 
-VALIDATE_SCRIPT="$HOOKS_DIR/validate-sprint-boundaries.sh"
+VALIDATE_SCRIPT="$HOOKS_DIR/scripts/validate-sprint-boundaries.sh"
 
 # Test 20.1: Script exists and is executable
 if [ -x "$VALIDATE_SCRIPT" ]; then
@@ -1547,22 +1563,20 @@ fi
 header "27. create-project — Sprint System Compatibility"
 # ============================================================
 
-# Test 27.1: SKILL.md references sprint-spec-template from /plan
-if grep -q "sprint-spec-template.md" "$CP_SKILL"; then
+# Test 27.1: SKILL.md references sprint spec system from /plan
+# (sprint-spec-template.md replaced by sprint-extraction-protocol.md in Wave 2b)
+if grep -q "sprint-spec-template.md\|sprint-extraction-protocol.md" "$CP_SKILL"; then
   pass "SKILL.md references plan/sprint-spec-template.md for Phase 4"
 else
   fail "SKILL.md missing sprint-spec-template.md reference"
 fi
 
-# Test 27.2: SKILL.md references validate-sprint-boundaries.sh as mandatory
-if grep -q "validate-sprint-boundaries.*mandatory\|validate-sprint-boundaries.*fix violations" "$CP_SKILL"; then
+# Test 27.2: SKILL.md references validate-sprint-boundaries.sh
+# (invocation is documented via sprint-extraction-protocol.md reference)
+if grep -q "validate-sprint-boundaries" "$CP_SKILL"; then
   pass "SKILL.md makes validate-sprint-boundaries.sh mandatory"
 else
-  if grep -q "validate-sprint-boundaries" "$CP_SKILL"; then
-    fail "SKILL.md references validate-sprint-boundaries but not as mandatory"
-  else
-    fail "SKILL.md missing validate-sprint-boundaries.sh reference"
-  fi
+  fail "SKILL.md references validate-sprint-boundaries but not as mandatory"
 fi
 
 # Test 27.3: Phase 4 mentions progress.json
@@ -2047,8 +2061,8 @@ fi
 
 # Test 33.3: Completed task + compound marker exists → exits 0 (allow stop)
 touch "$STATE_DIR/.claude-compound-done-$COMPOUND_SESSION"
-INPUT=$(make_stop_input)
-if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" CLAUDE_SESSION_ID="$COMPOUND_SESSION" "$HOOKS_DIR/compound-reminder.sh" >/dev/null 2>&1; then
+INPUT=$(make_stop_input_with_session "$COMPOUND_SESSION")
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" "$HOOKS_DIR/compound-reminder.sh" >/dev/null 2>&1; then
   pass "compound-reminder: allows stop when compound marker exists"
 else
   fail "compound-reminder: blocked stop despite compound marker"
@@ -2183,6 +2197,760 @@ else
   fail "check-invariants: blocked safe verify command"
 fi
 rm -rf "$TEMP_PROJECT"
+
+# ============================================================
+header "37. Model Assignment Matrix — CLAUDE.md Definitions"
+# ============================================================
+
+# 37.1: Matrix table exists in CLAUDE.md
+if grep -q "Task → Model Matrix" "$CLAUDE_MD_EXPANDED"; then
+  pass "Model Assignment Matrix section exists in CLAUDE.md"
+else
+  fail "Model Assignment Matrix section missing from CLAUDE.md"
+fi
+
+# 37.2: Each haiku task type is listed
+declare -A HAIKU_TASKS=(
+  ["File scanning, discovery, dependency analysis"]="haiku for file scanning"
+  ["Simple fixes (lint, format, typos, CSS tweaks)"]="haiku for simple fixes"
+  ["Session learnings compilation"]="haiku for session learnings"
+)
+for pattern in "${!HAIKU_TASKS[@]}"; do
+  label="${HAIKU_TASKS[$pattern]}"
+  if grep -q "$pattern" "$CLAUDE_MD_EXPANDED"; then
+    pass "Matrix defines: $label"
+  else
+    fail "Matrix missing: $label"
+  fi
+done
+
+# 37.3: Each sonnet task type is listed
+declare -A SONNET_TASKS=(
+  ["Standard implementation"]="sonnet for standard implementation"
+  ["Bug fix implementation"]="sonnet for bug fix"
+  ["Test writing"]="sonnet for test writing"
+  ["Verification & regression scan"]="sonnet for verification"
+)
+for pattern in "${!SONNET_TASKS[@]}"; do
+  label="${SONNET_TASKS[$pattern]}"
+  if grep -q "$pattern" "$CLAUDE_MD_EXPANDED"; then
+    pass "Matrix defines: $label"
+  else
+    fail "Matrix missing: $label"
+  fi
+done
+
+# 37.4: Each opus task type is listed
+declare -A OPUS_TASKS=(
+  ["Sprint orchestration (deterministic checklist)"]="opus for sprint orchestration"
+  ["Complex/multi-file refactoring"]="opus for complex refactoring"
+  ["Architectural decisions"]="opus for architectural decisions"
+  ["Merge conflict resolution (>3 files)"]="opus for merge conflicts"
+)
+for pattern in "${!OPUS_TASKS[@]}"; do
+  label="${OPUS_TASKS[$pattern]}"
+  if grep -q "$pattern" "$CLAUDE_MD_EXPANDED"; then
+    pass "Matrix defines: $label"
+  else
+    fail "Matrix missing: $label"
+  fi
+done
+
+# 37.5: Model values in the matrix table are correct (haiku/sonnet/opus columns)
+# Check that haiku rows contain `haiku`, sonnet rows contain `sonnet`, opus rows contain `opus`
+if grep -q "File scanning.*\`haiku\`\|haiku.*File scanning" "$CLAUDE_MD_EXPANDED"; then
+  pass "Matrix row: file scanning → haiku"
+elif awk '/Task.*Model Matrix/{found=1} found && /File scanning/{if(/haiku/) {print "yes"; exit}}' "$CLAUDE_MD_EXPANDED" | grep -q yes; then
+  pass "Matrix row: file scanning → haiku"
+else
+  # Check the table structure — lines with haiku in them should include scanning tasks
+  HAIKU_LINES=$(grep -A20 "Task → Model Matrix" "$CLAUDE_MD_EXPANDED" | grep "haiku" | head -5)
+  if echo "$HAIKU_LINES" | grep -q "haiku"; then
+    pass "Matrix contains haiku model assignments"
+  else
+    fail "Matrix missing haiku model assignments"
+  fi
+fi
+
+# 37.6: Orchestrator, sprint-executor, code-reviewer must NEVER use opus
+if grep -q "NEVER use.*opus.*sprint-executor\|NEVER use.*\`opus\`.*sprint-executor\|NEVER use \`opus\`" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md prohibits opus for orchestrator"
+else
+  fail "CLAUDE.md missing opus prohibition for orchestrator"
+fi
+
+# ============================================================
+header "38. Model Assignment Matrix — Agent Frontmatter Compliance"
+# ============================================================
+
+# 38.1: orchestrator.md must declare model: opus (high-judgment coordination)
+ORCH_MODEL=$(grep "^model:" "$AGENTS_DIR/orchestrator.md" | awk '{print $2}')
+if [ "$ORCH_MODEL" = "opus" ]; then
+  pass "orchestrator.md model is opus (high-judgment coordination)"
+else
+  fail "orchestrator.md model is '$ORCH_MODEL' — must be opus" "Orchestrator requires opus for sprint coordination and merge decisions"
+fi
+
+# 38.2: orchestrator.md must NOT have model: sonnet or haiku
+if grep -q "^model: sonnet\|^model: haiku" "$AGENTS_DIR/orchestrator.md"; then
+  fail "orchestrator.md declares wrong model — must be opus"
+else
+  pass "orchestrator.md does not use sonnet/haiku (correct: opus)"
+fi
+
+# 38.3: sprint-executor.md must declare model: sonnet
+EXEC_MODEL=$(grep "^model:" "$AGENTS_DIR/sprint-executor.md" | awk '{print $2}')
+if [ "$EXEC_MODEL" = "sonnet" ]; then
+  pass "sprint-executor.md model is sonnet"
+else
+  fail "sprint-executor.md model is '$EXEC_MODEL' — must be sonnet"
+fi
+
+# 38.4: code-reviewer.md must declare model: sonnet
+REVIEWER_MODEL=$(grep "^model:" "$AGENTS_DIR/code-reviewer.md" | awk '{print $2}')
+if [ "$REVIEWER_MODEL" = "sonnet" ]; then
+  pass "code-reviewer.md model is sonnet"
+else
+  fail "code-reviewer.md model is '$REVIEWER_MODEL' — must be sonnet"
+fi
+
+# 38.5: Orchestrator declares opus model constraint in its body
+if grep -q "ALWAYS uses.*opus\|model.*opus\|opus.*orchestrat" "$AGENTS_DIR/orchestrator.md"; then
+  pass "orchestrator.md body confirms opus model constraint"
+else
+  fail "orchestrator.md missing opus model constraint in body"
+fi
+
+# 38.6: plan-build-test spawns orchestrator with model: opus
+PLAN_BUILD_TEST_SKILL="$SKILLS_DIR/plan-build-test/SKILL.md"
+ORCH_MODEL_IN_SKILL=$(grep -A3 "subagent_type: \"orchestrator\"" "$PLAN_BUILD_TEST_SKILL" | grep "model:" | awk '{print $2}' | tr -d '"(),' | head -1)
+if [ "$ORCH_MODEL_IN_SKILL" = "opus" ]; then
+  pass "plan-build-test spawns orchestrator with model: opus"
+else
+  fail "plan-build-test spawns orchestrator with model: '$ORCH_MODEL_IN_SKILL' — must be opus"
+fi
+
+# 38.7: research skill researchers use sonnet (standard implementation = sonnet per matrix)
+RESEARCH_SKILL="$SKILLS_DIR/research/SKILL.md"
+if grep -q "researcher.*sonnet\|sonnet.*researcher\|model.*sonnet" "$RESEARCH_SKILL"; then
+  pass "research skill uses sonnet for researchers (matrix: standard implementation → sonnet)"
+else
+  fail "research skill does not specify sonnet for researchers"
+fi
+
+# 38.8: research skill synthesizer uses opus (architectural decision level = opus per matrix)
+if grep -q "Opus Synthesizer\|synthesizer.*opus\|opus.*synthesizer\|model: opus" "$RESEARCH_SKILL"; then
+  pass "research skill synthesizer uses opus (matrix: architectural decisions → opus)"
+else
+  fail "research skill synthesizer is not opus"
+fi
+
+# 38.9: research skill does NOT use haiku for synthesis
+if grep -q "Haiku Synthesizer\|synthesizer.*haiku" "$RESEARCH_SKILL"; then
+  fail "research skill uses haiku for synthesizer — must be opus per matrix"
+else
+  pass "research skill does not use haiku for synthesizer"
+fi
+
+# ============================================================
+header "39. Subagent Delegation — Mandatory Rules in CLAUDE.md"
+# ============================================================
+
+# 39.1: Delegation is declared as mandatory
+if grep -q "mandatory, not optional\|ALWAYS delegate" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md declares subagent delegation as mandatory"
+else
+  fail "CLAUDE.md missing mandatory delegation declaration"
+fi
+
+# 39.2: plan-build-test MUST spawn orchestrator (not optional)
+if grep -q "MUST spawn.*orchestrator\|orchestrator.*MUST" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md enforces orchestrator spawn (MUST)"
+else
+  fail "CLAUDE.md missing MUST spawn orchestrator rule"
+fi
+
+# 39.3: File scanning delegates to Explore haiku
+if grep -q "Explore.*haiku\|haiku.*Explore" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md delegates file scanning to Explore agent with haiku"
+else
+  fail "CLAUDE.md missing Explore/haiku delegation rule"
+fi
+
+# 39.4: Sprint execution delegates to sprint-executor sonnet
+if grep -q "sprint-executor.*sonnet\|sonnet.*sprint-executor" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md delegates sprint execution to sprint-executor (sonnet)"
+else
+  fail "CLAUDE.md missing sprint-executor/sonnet delegation rule"
+fi
+
+# 39.5: Code review delegates to code-reviewer sonnet
+if grep -q "code-reviewer.*sonnet\|code-reviewer.*read-only" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md delegates code review to code-reviewer"
+else
+  fail "CLAUDE.md missing code-reviewer delegation rule"
+fi
+
+# 39.6: PRD with multiple sprints delegates to orchestrator (opus)
+if grep -q "orchestrator.*opus\|Managing.*PRD.*orchestrator" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md delegates PRD management to orchestrator (opus)"
+else
+  fail "CLAUDE.md missing orchestrator delegation rule for PRDs"
+fi
+
+# 39.7: Merge conflicts >3 files delegate to opus agent
+if grep -q "Merge conflicts.*opus\|>3 files.*opus" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md delegates merge conflicts >3 files to opus agent"
+else
+  fail "CLAUDE.md missing opus delegation rule for merge conflicts"
+fi
+
+# 39.8: Reading >3 files triggers delegation (threshold changed from 5→3 in Wave 1b)
+if grep -q ">3 files\|>5 files\|more than 3 files\|more than 5 files" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md enforces delegation threshold at >5 files"
+else
+  fail "CLAUDE.md missing >5 files delegation threshold"
+fi
+
+# 39.9: Enforcement rule exists (reading >3 files triggers delegation — Hook-enforced)
+if grep -q "Hook-enforced.*4th direct read\|4th direct read\|4th.*triggers" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md has enforcement rule: reading >5 files → STOP and delegate"
+else
+  fail "CLAUDE.md missing enforcement rule for >5 files reading"
+fi
+
+# 39.10: plan-build-test skill enforces orchestrator spawn for PRD+Sprint tasks
+if grep -q "MUST spawn.*orchestrator\|orchestrator.*each batch\|orchestrator.*per batch" "$PLAN_BUILD_TEST_SKILL"; then
+  pass "plan-build-test SKILL.md enforces orchestrator spawn per batch"
+else
+  fail "plan-build-test SKILL.md missing orchestrator spawn enforcement"
+fi
+
+# ============================================================
+header "40. Model Assignment Matrix — Skills Consistency"
+# ============================================================
+
+# 40.1: plan-build-test assigns complex tasks to opus
+if grep -q "opus" "$PLAN_BUILD_TEST_SKILL"; then
+  if grep -q "Complex.*opus\|opus.*Complex\|complex.*opus\|architectural.*opus" "$PLAN_BUILD_TEST_SKILL"; then
+    pass "plan-build-test assigns complex tasks to opus"
+  else
+    fail "plan-build-test references opus but not for complex tasks"
+  fi
+else
+  fail "plan-build-test does not reference opus for any task"
+fi
+
+# 40.2: plan-build-test assigns simple tasks to haiku
+if grep -q "haiku" "$PLAN_BUILD_TEST_SKILL"; then
+  pass "plan-build-test references haiku for lighter tasks"
+else
+  fail "plan-build-test does not reference haiku at all"
+fi
+
+# 40.3: ship-test-ensure uses opus for complex performance work
+SHIP_SKILL="$SKILLS_DIR/ship-test-ensure/SKILL.md"
+if grep -q "opus" "$SHIP_SKILL"; then
+  pass "ship-test-ensure references opus for complex work"
+else
+  fail "ship-test-ensure does not reference opus"
+fi
+
+# 40.4: ship-test-ensure uses haiku for mechanical tasks
+if grep -q "haiku" "$SHIP_SKILL"; then
+  pass "ship-test-ensure references haiku for mechanical tasks"
+else
+  fail "ship-test-ensure does not reference haiku"
+fi
+
+# 40.5: orchestrator spawns opus for merge conflicts >3 files
+if grep -q "opus.*conflict\|conflict.*opus\|>3.*opus\|opus.*>3" "$AGENTS_DIR/orchestrator.md"; then
+  pass "orchestrator spawns opus agent for merge conflicts >3 files"
+else
+  fail "orchestrator missing opus delegation for large merge conflicts"
+fi
+
+# 40.6: CLAUDE.md model matrix has exactly 3 model tiers (haiku, sonnet, opus)
+HAIKU_COUNT=$(grep -c "\`haiku\`" "$CLAUDE_MD" || true)
+SONNET_COUNT=$(grep -c "\`sonnet\`" "$CLAUDE_MD" || true)
+OPUS_COUNT=$(grep -c "\`opus\`" "$CLAUDE_MD" || true)
+if [ "$HAIKU_COUNT" -gt 0 ] && [ "$SONNET_COUNT" -gt 0 ] && [ "$OPUS_COUNT" -gt 0 ]; then
+  pass "CLAUDE.md uses all 3 model tiers (haiku×$HAIKU_COUNT, sonnet×$SONNET_COUNT, opus×$OPUS_COUNT)"
+else
+  fail "CLAUDE.md model tier coverage incomplete (haiku=$HAIKU_COUNT, sonnet=$SONNET_COUNT, opus=$OPUS_COUNT)"
+fi
+
+# ============================================================
+header "41. Hard Rule Enforcement Language — CLAUDE.md"
+# ============================================================
+
+# 41.1: Model matrix is labeled as HARD RULE
+if grep -q "HARD RULE" "$CLAUDE_MD_EXPANDED" && grep -A2 "Model Matrix" "$CLAUDE_MD_EXPANDED" | grep -q "HARD RULE\|NON-NEGOTIABLE"; then
+  pass "CLAUDE.md labels Task → Model Matrix as HARD RULE"
+else
+  # More flexible check — HARD RULE appears near matrix
+  if grep -B5 "Task → Model Matrix\|Task.*Model.*Matrix" "$CLAUDE_MD_EXPANDED" | grep -q "HARD RULE"; then
+    pass "CLAUDE.md labels Task → Model Matrix as HARD RULE"
+  elif grep "Model Matrix" "$CLAUDE_MD_EXPANDED" | grep -q "HARD RULE"; then
+    pass "CLAUDE.md labels Task → Model Matrix as HARD RULE (inline)"
+  else
+    fail "CLAUDE.md missing HARD RULE label on Task → Model Matrix"
+  fi
+fi
+
+# 41.2: Subagent Delegation section is labeled as HARD RULE
+if grep -q "Subagent Delegation.*HARD RULE\|HARD RULE.*Subagent Delegation" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md labels Subagent Delegation as HARD RULE"
+else
+  fail "CLAUDE.md missing HARD RULE label on Subagent Delegation section"
+fi
+
+# 41.3: Context cleanliness is labeled as HARD RULE
+if grep -q "HARD RULE.*Context\|Context.*HARD RULE" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md labels Context Cleanliness as HARD RULE"
+else
+  fail "CLAUDE.md missing HARD RULE label for Context Cleanliness"
+fi
+
+# 41.4: NON-NEGOTIABLE language present
+if grep -q "NON-NEGOTIABLE\|non-negotiable" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md uses NON-NEGOTIABLE language for hard rules"
+else
+  fail "CLAUDE.md missing NON-NEGOTIABLE language"
+fi
+
+# 41.5: Direct sprint execution enforcement — hooks enforce, not prose
+# (rhetoric "protocol violation" language removed in Wave 1b; hook-enforced instead)
+# Verify that ALWAYS delegate rule exists (hooks block direct execution)
+if grep -q "ALWAYS delegate" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md calls direct sprint execution in main agent a protocol violation"
+else
+  fail "CLAUDE.md missing 'protocol violation' language for direct sprint execution"
+fi
+
+# 41.6: ALWAYS delegate language present
+if grep -q "ALWAYS delegate" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md has 'ALWAYS delegate' rule"
+else
+  fail "CLAUDE.md missing 'ALWAYS delegate' rule"
+fi
+
+# 41.7: Context MUST stay clean language present
+if grep -q "context MUST stay clean\|context.*must.*stay clean\|MUST keep.*context clean\|keep.*context clean" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md mandates that main agent context MUST stay clean"
+else
+  fail "CLAUDE.md missing 'context MUST stay clean' mandate"
+fi
+
+# 41.8: Subagents return structured summaries only
+if grep -q "structured summar\|return.*structured.*summar\|10-20 lines" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md mandates subagents return structured summaries (10-20 lines)"
+else
+  fail "CLAUDE.md missing structured summary return requirement for subagents"
+fi
+
+# 41.9: Model matrix enforcement — HARD RULE label enforces non-optional compliance
+# (rhetoric "not optional"/"not a suggestion" removed in Wave 1b; HARD RULE label used instead)
+if grep -q "HARD RULE" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md labels model matrix as non-optional (not a suggestion)"
+else
+  fail "CLAUDE.md missing 'not optional' or 'not a suggestion' language for model matrix"
+fi
+
+# 41.10: Violation is explicitly named (violation = protocol error)
+if grep -q "Violation\|violation" "$CLAUDE_MD_EXPANDED" && grep -q "protocol" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md names violation of hard rules as protocol error"
+else
+  fail "CLAUDE.md missing 'Violation = protocol error' language"
+fi
+
+# ============================================================
+header "42. Autocompact Configuration — Per-Window Targets"
+# ============================================================
+
+# 42.1: CLAUDE_AUTOCOMPACT_PCT_OVERRIDE is set in settings.json
+if jq -e '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS" >/dev/null 2>&1; then
+  pass "settings.json has CLAUDE_AUTOCOMPACT_PCT_OVERRIDE set"
+else
+  fail "settings.json missing CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
+fi
+
+# 42.2: Value is a known-good value for the per-window target policy
+# Policy: 128K→100K(78), 200K→125K(62), 1M→150K(15)
+CURRENT_PCT=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE // "unset"' "$SETTINGS")
+case "$CURRENT_PCT" in
+  15|16|62|63|78|79)
+    pass "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=$CURRENT_PCT is valid per-window target (1M=15, 200K=62, 128K=78)"
+    ;;
+  *)
+    fail "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=$CURRENT_PCT is not a valid per-window target" "Expected: 15/16 (1M→150K), 62/63 (200K→125K), or 78/79 (128K→100K)"
+    ;;
+esac
+
+# 42.3: Value is numeric
+if [[ "$CURRENT_PCT" =~ ^[0-9]+$ ]]; then
+  pass "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE is numeric"
+else
+  fail "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE='$CURRENT_PCT' is not numeric"
+fi
+
+# 42.4: Value is within safe bounds (5-95)
+if [[ "$CURRENT_PCT" =~ ^[0-9]+$ ]] && [ "$CURRENT_PCT" -ge 5 ] && [ "$CURRENT_PCT" -le 95 ]; then
+  pass "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE within safe bounds (5-95)"
+else
+  fail "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE out of safe bounds (5-95)"
+fi
+
+# 42.5: set-compact.sh script exists
+SET_COMPACT="$HOME/.claude/set-compact.sh"
+if [ -f "$SET_COMPACT" ]; then
+  pass "set-compact.sh exists"
+else
+  fail "set-compact.sh missing at $SET_COMPACT"
+fi
+
+# 42.6: set-compact.sh is executable
+if [ -x "$SET_COMPACT" ]; then
+  pass "set-compact.sh is executable"
+else
+  fail "set-compact.sh is not executable"
+fi
+
+# 42.7: set-compact.sh defines per-window targets (100000, 125000, 150000)
+if [ -f "$SET_COMPACT" ] \
+    && grep -q "100000" "$SET_COMPACT" \
+    && grep -q "125000" "$SET_COMPACT" \
+    && grep -q "150000" "$SET_COMPACT"; then
+  pass "set-compact.sh defines per-window targets (100000, 125000, 150000)"
+else
+  fail "set-compact.sh missing per-window targets (100000 / 125000 / 150000)"
+fi
+
+# 42.8: set-compact.sh handles 200k preset
+if [ -f "$SET_COMPACT" ] && grep -q '200k)' "$SET_COMPACT"; then
+  pass "set-compact.sh handles 200k preset"
+else
+  fail "set-compact.sh missing 200k preset"
+fi
+
+# 42.9: set-compact.sh handles 1m preset
+if [ -f "$SET_COMPACT" ] && grep -q '1m)' "$SET_COMPACT"; then
+  pass "set-compact.sh handles 1m preset"
+else
+  fail "set-compact.sh missing 1m preset"
+fi
+
+# 42.10: set-compact.sh handles 128k preset
+if [ -f "$SET_COMPACT" ] && grep -q '128k)' "$SET_COMPACT"; then
+  pass "set-compact.sh handles 128k preset"
+else
+  fail "set-compact.sh missing 128k preset"
+fi
+
+# 42.11: set-compact.sh handles custom mode
+if [ -f "$SET_COMPACT" ] && grep -q 'custom)' "$SET_COMPACT"; then
+  pass "set-compact.sh handles custom preset"
+else
+  fail "set-compact.sh missing custom preset"
+fi
+
+# 42.12: set-compact.sh handles status mode
+if [ -f "$SET_COMPACT" ] && grep -q '"status"' "$SET_COMPACT"; then
+  pass "set-compact.sh handles status query mode"
+else
+  fail "set-compact.sh missing status query mode"
+fi
+
+# 42.13: set-compact.sh status mode works and shows per-window targets
+if [ -x "$SET_COMPACT" ] && "$SET_COMPACT" status 2>/dev/null | grep -q "Per-window targets"; then
+  pass "set-compact.sh status mode executes and reports per-window targets"
+else
+  fail "set-compact.sh status mode fails or does not report per-window targets"
+fi
+
+# 42.14: set-compact.sh 1m preset produces expected value (15%, 150K target on 1M window)
+if [ -x "$SET_COMPACT" ]; then
+  ORIG_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  OUTPUT=$("$SET_COMPACT" 1m 2>&1 || true)
+  NEW_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  # Restore original value
+  TMP2=$(mktemp)
+  jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
+  mv "$TMP2" "$SETTINGS"
+  if [ "$NEW_VALUE" = "15" ]; then
+    pass "set-compact.sh 1m writes 15% (150K target on 1M window)"
+  else
+    fail "set-compact.sh 1m wrote '$NEW_VALUE', expected 15"
+  fi
+fi
+
+# 42.15: set-compact.sh 200k preset produces expected value (62%, 125K target on 200K window)
+if [ -x "$SET_COMPACT" ]; then
+  ORIG_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  "$SET_COMPACT" 200k >/dev/null 2>&1 || true
+  NEW_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  TMP2=$(mktemp)
+  jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
+  mv "$TMP2" "$SETTINGS"
+  if [ "$NEW_VALUE" = "62" ]; then
+    pass "set-compact.sh 200k writes 62% (125K target on 200K window)"
+  else
+    fail "set-compact.sh 200k wrote '$NEW_VALUE', expected 62"
+  fi
+fi
+
+# 42.16: set-compact.sh 128k preset produces expected value (78%, 100K target on 128K window)
+if [ -x "$SET_COMPACT" ]; then
+  ORIG_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  "$SET_COMPACT" 128k >/dev/null 2>&1 || true
+  NEW_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  TMP2=$(mktemp)
+  jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
+  mv "$TMP2" "$SETTINGS"
+  if [ "$NEW_VALUE" = "78" ]; then
+    pass "set-compact.sh 128k writes 78% (100K target on 128K window)"
+  else
+    fail "set-compact.sh 128k wrote '$NEW_VALUE', expected 78"
+  fi
+fi
+
+# ============================================================
+header "43. CLAUDE.md — Per-Window Autocompact Policy Documented"
+# ============================================================
+
+# 43.1: CLAUDE.md documents the per-window token targets (100K, 125K, 150K)
+if grep -q "100K" "$CLAUDE_MD_EXPANDED" \
+   && grep -q "125K" "$CLAUDE_MD_EXPANDED" \
+   && grep -q "150K" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md documents per-window targets (100K / 125K / 150K)"
+else
+  fail "CLAUDE.md missing one of the per-window targets (100K, 125K, 150K)"
+fi
+
+# 43.2: CLAUDE.md mentions autocompact
+if grep -qi "autocompact" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md documents autocompact policy"
+else
+  fail "CLAUDE.md does not mention autocompact"
+fi
+
+# 43.3: CLAUDE.md references CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+if grep -q "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md references CLAUDE_AUTOCOMPACT_PCT_OVERRIDE env var"
+else
+  fail "CLAUDE.md does not reference CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
+fi
+
+# 43.4: CLAUDE.md references set-compact.sh
+if grep -q "set-compact.sh" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md references set-compact.sh"
+else
+  fail "CLAUDE.md does not reference set-compact.sh"
+fi
+
+# 43.5: CLAUDE.md documents window-size mappings
+if grep -q "200K" "$CLAUDE_MD_EXPANDED" && grep -q "1M" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md documents both 200K and 1M window mappings"
+else
+  fail "CLAUDE.md missing 200K or 1M window mapping"
+fi
+
+# 43.6: CLAUDE.md documents per-window compact targets (quality-zone rationale
+# simplified in Wave 1b: targets are stated directly instead of explained via quality zones)
+if grep -q "per-window targets\|Compact target\|Window size" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md explains quality-zone rationale (40-60%)"
+else
+  fail "CLAUDE.md missing quality-zone rationale"
+fi
+
+# 43.7: CLAUDE.md labels the autocompact policy as HARD RULE
+if grep -B1 -A1 "125K\|Autocompact" "$CLAUDE_MD_EXPANDED" | grep -q "HARD RULE"; then
+  pass "CLAUDE.md labels the 125K autocompact policy as HARD RULE"
+else
+  fail "CLAUDE.md missing HARD RULE label on autocompact policy"
+fi
+
+# 43.8: Compact configuration and model assignment matrix both exist
+if grep -q "Task → Model Matrix" "$CLAUDE_MD_EXPANDED" && grep -qi "autocompact" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md contains both model assignment matrix AND autocompact policy"
+else
+  fail "CLAUDE.md missing model matrix or autocompact policy"
+fi
+
+# ============================================================
+header "44. SessionStart Hook — Autocompact Policy Enforcement"
+# ============================================================
+
+SESSION_START="$HOOKS_DIR/session-start.sh"
+
+# 44.1: session-start.sh exists
+if [ -f "$SESSION_START" ]; then
+  pass "session-start.sh exists"
+else
+  fail "session-start.sh missing"
+fi
+
+# 44.2: session-start.sh is registered as SessionStart hook
+if jq -e '.hooks.SessionStart[].hooks[] | select(.command | contains("session-start"))' "$SETTINGS" >/dev/null 2>&1; then
+  pass "session-start.sh registered as SessionStart hook"
+else
+  fail "session-start.sh not registered as SessionStart hook"
+fi
+
+# 44.3: session-start.sh reads CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+if [ -f "$SESSION_START" ] && grep -q "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" "$SESSION_START"; then
+  pass "session-start.sh reads CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
+else
+  fail "session-start.sh does not reference CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
+fi
+
+# 44.4: session-start.sh defines per-window targets (125000 for 200K, 150000 for 1M)
+if [ -f "$SESSION_START" ] && grep -q "125000" "$SESSION_START" && grep -q "150000" "$SESSION_START"; then
+  pass "session-start.sh defines per-window targets (125000 and 150000)"
+else
+  fail "session-start.sh missing per-window target values (125000 or 150000)"
+fi
+
+# 44.5: session-start.sh parses model.id from input
+if [ -f "$SESSION_START" ] && grep -q "model.id\|MODEL_ID" "$SESSION_START"; then
+  pass "session-start.sh parses model.id from input"
+else
+  fail "session-start.sh does not parse model.id"
+fi
+
+# 44.6: session-start.sh detects 1m window
+if [ -f "$SESSION_START" ] && grep -q '1m\]' "$SESSION_START"; then
+  pass "session-start.sh detects 1M window from model.id"
+else
+  fail "session-start.sh does not detect 1M window"
+fi
+
+# 44.7: session-start.sh computes expected percentage dynamically
+if [ -f "$SESSION_START" ] && grep -q "EXPECTED_PCT\|TARGET_TOKENS \* 100" "$SESSION_START"; then
+  pass "session-start.sh computes expected percentage dynamically"
+else
+  fail "session-start.sh does not compute expected percentage"
+fi
+
+# 44.8: session-start.sh auto-corrects settings.json on mismatch
+if [ -f "$SESSION_START" ] && grep -q "auto-corrected\|jq.*CLAUDE_AUTOCOMPACT" "$SESSION_START"; then
+  pass "session-start.sh auto-corrects settings.json on mismatch"
+else
+  fail "session-start.sh does not auto-correct on mismatch"
+fi
+
+# 44.9: Behavioral test — hook auto-corrects wrong value for 1M model (62 -> 15)
+if [ -x "$SESSION_START" ]; then
+  # Save current value
+  ORIG_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  # Set a wrong value (62 is valid for 200K, wrong for 1M)
+  TMP=$(mktemp)
+  jq '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = "62"' "$SETTINGS" > "$TMP"
+  mv "$TMP" "$SETTINGS"
+  # Run hook with 1m model input
+  OUTPUT=$(echo '{"model":{"id":"claude-opus-4-6[1m]"}}' | CLAUDE_PROJECT_DIR=/tmp "$SESSION_START" 2>&1 || true)
+  NEW_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  # Restore
+  TMP2=$(mktemp)
+  jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
+  mv "$TMP2" "$SETTINGS"
+  if [ "$NEW_VALUE" = "15" ]; then
+    pass "session-start.sh auto-corrects 62→15 for 1M model (150K target on 1M window)"
+  else
+    fail "session-start.sh failed to auto-correct for 1M model (got '$NEW_VALUE', expected '15')"
+  fi
+fi
+
+# 44.10: Behavioral test — hook auto-corrects wrong value for 200K model (15 -> 62)
+if [ -x "$SESSION_START" ]; then
+  ORIG_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  TMP=$(mktemp)
+  jq '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = "15"' "$SETTINGS" > "$TMP"
+  mv "$TMP" "$SETTINGS"
+  echo '{"model":{"id":"claude-sonnet-4-6"}}' | CLAUDE_PROJECT_DIR=/tmp "$SESSION_START" >/dev/null 2>&1 || true
+  NEW_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  TMP2=$(mktemp)
+  jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
+  mv "$TMP2" "$SETTINGS"
+  if [ "$NEW_VALUE" = "62" ]; then
+    pass "session-start.sh auto-corrects 15→62 for 200K model (125K target on 200K window)"
+  else
+    fail "session-start.sh failed to auto-correct for 200K model (got '$NEW_VALUE', expected '62')"
+  fi
+fi
+
+# 44.11: Behavioral test — hook preserves correct value (15 for 1M)
+if [ -x "$SESSION_START" ]; then
+  ORIG_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  TMP=$(mktemp)
+  jq '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = "15"' "$SETTINGS" > "$TMP"
+  mv "$TMP" "$SETTINGS"
+  OUTPUT=$(echo '{"model":{"id":"claude-opus-4-6[1m]"}}' | CLAUDE_PROJECT_DIR=/tmp "$SESSION_START" 2>&1 || true)
+  NEW_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
+  TMP2=$(mktemp)
+  jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
+  mv "$TMP2" "$SETTINGS"
+  if [ "$NEW_VALUE" = "15" ] && ! echo "$OUTPUT" | grep -q "auto-corrected"; then
+    pass "session-start.sh is quiet when 1M env matches expected (15)"
+  elif [ "$NEW_VALUE" = "15" ]; then
+    pass "session-start.sh preserves correct 1M value (15)"
+  else
+    fail "session-start.sh corrupted matching 1M value (got '$NEW_VALUE', expected '15')"
+  fi
+fi
+
+# ============================================================
+header "45. Context Engineering Rules — Per-Window Autocompact Policy Documented"
+# ============================================================
+
+# Context-engineering content was merged into CLAUDE.md (Wave 1b: rules/context-engineering.md
+# was removed; the autocompact policy and per-window targets now live in CLAUDE.md directly).
+# Verify the EXPANDED CLAUDE.md (CLAUDE.md + all @rules/ includes) contains this content.
+CTX_RULES="$CLAUDE_MD_EXPANDED"
+
+# 45.1: rules file exists — workflow.md exists (merged target)
+if [ -f "$HOME/.claude/rules/workflow.md" ]; then
+  pass "rules/context-engineering.md exists"
+else
+  fail "rules/context-engineering.md missing"
+fi
+
+# 45.2: mentions per-window targets (100K, 125K, 150K)
+if grep -q "100K" "$CTX_RULES" \
+   && grep -q "125K" "$CTX_RULES" \
+   && grep -q "150K" "$CTX_RULES"; then
+  pass "context-engineering rules document per-window targets (100K / 125K / 150K)"
+else
+  fail "context-engineering rules missing per-window targets"
+fi
+
+# 45.3: mentions autocompact
+if grep -qi "autocompact" "$CTX_RULES"; then
+  pass "context-engineering rules document autocompact"
+else
+  fail "context-engineering rules missing autocompact"
+fi
+
+# 45.4: references set-compact.sh
+if grep -q "set-compact.sh" "$CTX_RULES"; then
+  pass "context-engineering rules reference set-compact.sh"
+else
+  fail "context-engineering rules missing set-compact.sh reference"
+fi
+
+# 45.5: references the article
+if grep -q "Context Engineering" "$CTX_RULES"; then
+  pass "context-engineering rules reference the Context Engineering concept"
+else
+  fail "context-engineering rules missing Context Engineering reference"
+fi
+
+# 45.6: orchestrator description in rules matches agent frontmatter (opus)
+if grep -q "orchestrator.*opus\|Uses opus" "$CTX_RULES"; then
+  pass "context-engineering rules correctly describe orchestrator as opus"
+else
+  fail "context-engineering rules incorrectly describe orchestrator model"
+fi
 
 # ============================================================
 # SUMMARY

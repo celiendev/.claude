@@ -19,6 +19,9 @@ trap 'echo "HOOK WARNING: cleanup-worktrees.sh crashed at line $LINENO" >&2; exi
 # Source shared logging utility
 source ~/.claude/hooks/lib/hook-logger.sh 2>/dev/null || true
 
+# Source shared stop-guard (fail-open: if missing, guard is a no-op)
+source ~/.claude/hooks/lib/stop-guard.sh 2>/dev/null || true
+
 # ─── CONFIGURATION ─────────────────────────────────────────────────────
 
 HOOK_NAME="cleanup-worktrees"
@@ -35,14 +38,7 @@ else
 fi
 
 # Check stop_hook_active — prevent infinite loop
-STOP_HOOK_ACTIVE="false"
-if command -v jq &>/dev/null; then
-  STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null || echo "false")
-fi
-
-if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
-  exit 0
-fi
+check_stop_hook_active "$INPUT"
 
 # ─── RESOLVE PROJECT DIRECTORY ─────────────────────────────────────────
 
@@ -95,6 +91,44 @@ if [ -z "$WORKTREE_LIST" ]; then
   exit 0
 fi
 
+# ─── WORKTREE PROCESSOR (shared logic for loop body and final-entry case) ──
+
+# process_worktree PATH BRANCH
+# Checks if the worktree at PATH with BRANCH is merged and safe to remove.
+# Updates REMOVED_COUNT and WARNED_COUNT globals.
+process_worktree() {
+  local wt_path="$1" wt_branch="$2"
+  local main_head wt_dirty
+
+  # Check if branch is merged into HEAD of main worktree
+  main_head=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "")
+  if [ -n "$main_head" ] && git -C "$PROJECT_DIR" merge-base --is-ancestor "$wt_branch" HEAD 2>/dev/null; then
+    # Branch is merged — check worktree is clean before removing
+    wt_dirty=$(git -C "$wt_path" status --porcelain 2>/dev/null || echo "")
+    if [ -n "$wt_dirty" ]; then
+      log_hook_event "$HOOK_NAME" "WARNING" "worktree $wt_path has uncommitted changes despite merged branch — skipping"
+      echo "HOOK WARNING: cleanup-worktrees: worktree has dirty state: $wt_path ($wt_branch)" >&2
+      WARNED_COUNT=$((WARNED_COUNT + 1))
+    elif git -C "$PROJECT_DIR" worktree remove "$wt_path" 2>/dev/null; then
+      log_hook_event "$HOOK_NAME" "removed-worktree" "$wt_path (branch: $wt_branch)"
+      # Use -d (not -D) — will refuse if branch somehow has unmerged commits
+      if git -C "$PROJECT_DIR" branch -d "$wt_branch" 2>/dev/null; then
+        log_hook_event "$HOOK_NAME" "deleted-branch" "$wt_branch (merged)"
+      else
+        log_hook_event "$HOOK_NAME" "branch-delete-skipped" "$wt_branch — git branch -d refused (safety net)"
+      fi
+      REMOVED_COUNT=$((REMOVED_COUNT + 1))
+    else
+      log_hook_event "$HOOK_NAME" "remove-failed" "could not remove worktree $wt_path"
+    fi
+  else
+    # Branch has unmerged commits — log warning, do NOT delete
+    log_hook_event "$HOOK_NAME" "WARNING" "worktree $wt_path (branch: $wt_branch) has unmerged changes — skipping"
+    echo "HOOK WARNING: cleanup-worktrees: unmerged worktree preserved: $wt_path ($wt_branch)" >&2
+    WARNED_COUNT=$((WARNED_COUNT + 1))
+  fi
+}
+
 # Track whether we are reading the first (main) worktree
 IS_FIRST=true
 CURRENT_PATH=""
@@ -104,33 +138,7 @@ while IFS= read -r line; do
   if [[ "$line" == worktree\ * ]]; then
     # Process previous worktree entry (if any and not main)
     if [ "$IS_FIRST" = "false" ] && [ -n "$CURRENT_PATH" ] && [ -n "$CURRENT_BRANCH" ]; then
-      # Check if branch is merged into HEAD of main worktree
-      MAIN_HEAD=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "")
-      if [ -n "$MAIN_HEAD" ] && git -C "$PROJECT_DIR" merge-base --is-ancestor "$CURRENT_BRANCH" HEAD 2>/dev/null; then
-        # Branch is merged — check worktree is clean before removing
-        WT_DIRTY=$(git -C "$CURRENT_PATH" status --porcelain 2>/dev/null || echo "")
-        if [ -n "$WT_DIRTY" ]; then
-          log_hook_event "$HOOK_NAME" "WARNING" "worktree $CURRENT_PATH has uncommitted changes despite merged branch — skipping"
-          echo "HOOK WARNING: cleanup-worktrees: worktree has dirty state: $CURRENT_PATH ($CURRENT_BRANCH)" >&2
-          WARNED_COUNT=$((WARNED_COUNT + 1))
-        elif git -C "$PROJECT_DIR" worktree remove "$CURRENT_PATH" 2>/dev/null; then
-          log_hook_event "$HOOK_NAME" "removed-worktree" "$CURRENT_PATH (branch: $CURRENT_BRANCH)"
-          # Use -d (not -D) — will refuse if branch somehow has unmerged commits
-          if git -C "$PROJECT_DIR" branch -d "$CURRENT_BRANCH" 2>/dev/null; then
-            log_hook_event "$HOOK_NAME" "deleted-branch" "$CURRENT_BRANCH (merged)"
-          else
-            log_hook_event "$HOOK_NAME" "branch-delete-skipped" "$CURRENT_BRANCH — git branch -d refused (safety net)"
-          fi
-          REMOVED_COUNT=$((REMOVED_COUNT + 1))
-        else
-          log_hook_event "$HOOK_NAME" "remove-failed" "could not remove worktree $CURRENT_PATH"
-        fi
-      else
-        # Branch has unmerged commits — log warning, do NOT delete
-        log_hook_event "$HOOK_NAME" "WARNING" "worktree $CURRENT_PATH (branch: $CURRENT_BRANCH) has unmerged changes — skipping"
-        echo "HOOK WARNING: cleanup-worktrees: unmerged worktree preserved: $CURRENT_PATH ($CURRENT_BRANCH)" >&2
-        WARNED_COUNT=$((WARNED_COUNT + 1))
-      fi
+      process_worktree "$CURRENT_PATH" "$CURRENT_BRANCH"
     fi
 
     # Start tracking new worktree entry
@@ -153,29 +161,7 @@ done <<< "$WORKTREE_LIST"
 
 # Process the last worktree entry (loop ends without a blank-line trigger)
 if [ "$IS_FIRST" = "false" ] && [ -n "$CURRENT_PATH" ] && [ -n "$CURRENT_BRANCH" ]; then
-  MAIN_HEAD=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "")
-  if [ -n "$MAIN_HEAD" ] && git -C "$PROJECT_DIR" merge-base --is-ancestor "$CURRENT_BRANCH" HEAD 2>/dev/null; then
-    WT_DIRTY=$(git -C "$CURRENT_PATH" status --porcelain 2>/dev/null || echo "")
-    if [ -n "$WT_DIRTY" ]; then
-      log_hook_event "$HOOK_NAME" "WARNING" "worktree $CURRENT_PATH has uncommitted changes despite merged branch — skipping"
-      echo "HOOK WARNING: cleanup-worktrees: worktree has dirty state: $CURRENT_PATH ($CURRENT_BRANCH)" >&2
-      WARNED_COUNT=$((WARNED_COUNT + 1))
-    elif git -C "$PROJECT_DIR" worktree remove "$CURRENT_PATH" 2>/dev/null; then
-      log_hook_event "$HOOK_NAME" "removed-worktree" "$CURRENT_PATH (branch: $CURRENT_BRANCH)"
-      if git -C "$PROJECT_DIR" branch -d "$CURRENT_BRANCH" 2>/dev/null; then
-        log_hook_event "$HOOK_NAME" "deleted-branch" "$CURRENT_BRANCH (merged)"
-      else
-        log_hook_event "$HOOK_NAME" "branch-delete-skipped" "$CURRENT_BRANCH — git branch -d refused (safety net)"
-      fi
-      REMOVED_COUNT=$((REMOVED_COUNT + 1))
-    else
-      log_hook_event "$HOOK_NAME" "remove-failed" "could not remove worktree $CURRENT_PATH"
-    fi
-  else
-    log_hook_event "$HOOK_NAME" "WARNING" "worktree $CURRENT_PATH (branch: $CURRENT_BRANCH) has unmerged changes — skipping"
-    echo "HOOK WARNING: cleanup-worktrees: unmerged worktree preserved: $CURRENT_PATH ($CURRENT_BRANCH)" >&2
-    WARNED_COUNT=$((WARNED_COUNT + 1))
-  fi
+  process_worktree "$CURRENT_PATH" "$CURRENT_BRANCH"
 fi
 
 # ─── SUMMARY ───────────────────────────────────────────────────────────

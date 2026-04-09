@@ -20,9 +20,9 @@ Detect the project stack and verify the hooks system is properly configured for 
    - `~/.claude/hooks/end-of-turn-typecheck.sh` — Stop: type-checks TypeScript at end of turn
    - `~/.claude/hooks/block-dangerous.sh` — PreToolUse: blocks destructive commands
    - `~/.claude/hooks/compound-reminder.sh` — Stop: blocks session end without /compound
-   - `~/.claude/hooks/proot-preflight.sh` — PreToolUse: proot-distro environment warnings
-   - `~/.claude/hooks/worktree-preflight.sh` — Called by orchestrator for worktree setup
-   - `~/.claude/hooks/retry-with-backoff.sh` — Sourceable utility for API retries
+   - `~/.claude/hooks/scripts/worktree-preflight.sh` — Called by orchestrator for worktree setup
+   - `~/.claude/hooks/scripts/retry-with-backoff.sh` — Sourceable utility for API retries
+   - (proot-preflight merged into session-start.sh)
    - If any are missing or not executable, report it
 
 4. **Verify settings.json has hooks configured:**

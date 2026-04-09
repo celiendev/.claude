@@ -17,14 +17,14 @@ if ! command -v jq &>/dev/null; then
   exit 0
 fi
 
+# Source shared stop-guard (fail-open: if missing, guard is a no-op)
+source ~/.claude/hooks/lib/stop-guard.sh 2>/dev/null || true
+
 # Read JSON input from stdin
 INPUT=$(cat)
 
 # Check stop_hook_active — prevent infinite loop
-STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)
-if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
-  exit 0
-fi
+check_stop_hook_active "$INPUT"
 
 # Resolve project directory
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
@@ -55,7 +55,8 @@ fi
 
 # Check if compound was run this session.
 # Only the explicit marker file satisfies this check — no fallbacks.
-MARKER="${HOME}/.claude/state/.claude-compound-done-${CLAUDE_SESSION_ID:-unknown}"
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"' 2>/dev/null || echo "unknown")
+MARKER="${HOME}/.claude/state/.claude-compound-done-${SESSION_ID}"
 
 if [ ! -f "$MARKER" ]; then
   echo "BLOCKED: Completed task detected but /compound hasn't run." >&2

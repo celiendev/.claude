@@ -6,6 +6,7 @@ description: >
   patterns. Cannot modify files.
 model: sonnet
 tools: Read, Grep, Glob
+permissionMode: readonly
 ---
 
 # Code Reviewer

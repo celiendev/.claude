@@ -80,4 +80,41 @@ else
   }
 fi
 
+# === console.log detection for JS/TS files ===
+# PostToolUse: warn (don't block) — just print to stdout so Claude sees it.
+
+EXT="${FILE_PATH##*.}"
+case "$EXT" in
+  ts|tsx|js|jsx)
+    # Skip test files by filename pattern or directory
+    BASENAME=$(basename "$FILE_PATH")
+    IS_TEST_FILE=false
+    case "$BASENAME" in
+      *.test.*|*.spec.*) IS_TEST_FILE=true ;;
+    esac
+    case "$FILE_PATH" in
+      */tests/*|*/__tests__/*|*/test/*|*/spec/*) IS_TEST_FILE=true ;;
+    esac
+
+    if [ "$IS_TEST_FILE" = "false" ] && [ -f "$FILE_PATH" ]; then
+      # Count console.log( calls that are NOT eslint-disable-line no-console
+      CONSOLE_COUNT=0
+      while IFS= read -r line; do
+        # Skip lines with eslint-disable no-console comment
+        if echo "$line" | grep -q 'eslint-disable.*no-console'; then
+          continue
+        fi
+        if echo "$line" | grep -qF 'console.log('; then
+          CONSOLE_COUNT=$((CONSOLE_COUNT + 1))
+        fi
+      done < "$FILE_PATH"
+
+      if [ "$CONSOLE_COUNT" -gt 0 ]; then
+        printf '⚠ post-edit-quality: %d console.log call(s) detected in %s. Remove before committing (rule in CLAUDE.md Post-Implementation Checklist).\n' \
+          "$CONSOLE_COUNT" "$FILE_PATH"
+      fi
+    fi
+    ;;
+esac
+
 exit 0

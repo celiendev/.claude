@@ -34,7 +34,7 @@ While `CLAUDE.md` provides guidelines the model "should" follow, `settings.json`
 │  ┌──────────────────┐                                               │
 │  │  PreToolUse      │ ◄── Runs BEFORE every Bash command            │
 │  │  (Bash)          │     block-dangerous.sh: hard/soft blocks      │
-│  │                  │     proot-preflight.sh: environment warnings   │
+│  │                  │     (proot checks merged into session-start.sh) │
 │  │                  │     check-docs-updated.sh: doc sync on push   │
 │  └──────────────────┘                                               │
 │                                                                     │
@@ -77,7 +77,7 @@ While `CLAUDE.md` provides guidelines the model "should" follow, `settings.json`
 | Hook | Type | Trigger | Purpose | Blocking? |
 |---|---|---|---|---|
 | `block-dangerous.sh` | PreToolUse(Bash) | Every shell command | Block destructive operations; project-aware pkg mgr | Hard/soft block |
-| `proot-preflight.sh` | PreToolUse(Bash) | First command/session | Warn about proot issues (language-aware) | No (informational) |
+| `session-start.sh` | SessionStart | Session begin | Detect proot, warn about issues, load session state | No (informational) |
 | `check-test-exists.sh` | PreToolUse(Write/Edit) | Every file edit | TDD gate — require test file (16 languages) | Yes (exit 2 if missing) |
 | `post-edit-quality.sh` | PostToolUse(Write/Edit) | Every file edit | Auto-format code (all languages) | Yes (exit 2 on lint errors) |
 | `check-invariants.sh` | PostToolUse(Write/Edit) | Every file edit | Verify INVARIANTS.md rules | Yes (exit 2 on violation) |

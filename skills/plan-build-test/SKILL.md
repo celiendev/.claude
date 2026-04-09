@@ -52,21 +52,7 @@ If the project CLAUDE.md does not define explicit commands, infer them from `pac
 
 ### Step 0.0: Ensure Session Learnings File Exists
 
-Before anything else, create the session-learnings file if it doesn't exist.
-This prevents learning loss on `/compact` or session end.
-
-```bash
-SESSION_FILE="${SESSION_LEARNINGS_PATH}"  # from project CLAUDE.md Execution Config
-if [ -z "$SESSION_FILE" ]; then
-  SESSION_FILE="docs/session-learnings.md"
-fi
-mkdir -p "$(dirname "$SESSION_FILE")"
-if [ ! -f "$SESSION_FILE" ]; then
-  echo "# Session Learnings" > "$SESSION_FILE"
-  echo "" >> "$SESSION_FILE"
-  echo "Created: $(date -Iseconds)" >> "$SESSION_FILE"
-fi
-```
+Create the session learnings file at the configured path (from project CLAUDE.md `session-learnings-path`, default: `docs/session-learnings.md`) if it doesn't exist. This prevents learning loss on `/compact` or session end.
 
 ### Step 0.1: Check for PRD with progress.json
 
@@ -134,23 +120,7 @@ Spawn a **general-purpose agent** (`model: "haiku"`) to analyze dependencies usi
 >
 > Determine which tasks are **independent** vs **dependent** (see CLAUDE.md criteria).
 >
-> Return a JSON structure:
->
-> ```json
-> {
->   "batches": [
->     {
->       "batch": 1,
->       "tasks": ["task1.md", "task2.md"],
->       "parallel": true,
->       "reason": "touch different pages"
->     }
->   ],
->   "dependency_graph": { "task3.md": ["task1.md"] }
-> }
-> ```
->
-> When in doubt, mark tasks as DEPENDENT.
+> Return JSON with fields: `batches` (array of `{batch, tasks, parallel, reason}`) and `dependency_graph` (map of task → dependencies). When in doubt, mark tasks as DEPENDENT.
 
 ### Step 2.2: Assign Models to Tasks
 
@@ -242,7 +212,7 @@ for each batch (ordered by batch number):
            Session learnings rules: [relevant rules]
            Context files: [key reference files]",
            subagent_type: "orchestrator",
-           model: "sonnet")
+           model: "opus")
 
   5. Receive results from orchestrator
   6. Re-read progress.json (orchestrator updated it)
@@ -384,83 +354,19 @@ Run these commands directly (no subagent needed for simple commands):
 If any fail: fix the issue, re-run. Max 3 fix attempts per command. If still
 failing after 3: mark as BLOCKED, log in session learnings, report to user.
 
-### Step 5.2: Dev Server Startup (MANDATORY)
+### Step 5.2: Dev Server Startup + Content Verification (MANDATORY)
 
-**The dev server MUST start and respond to HTTP requests. This is not optional.**
+Full protocol: `~/.claude/docs/on-demand/dev-server-protocol.md`
 
-```
-1. Run kill command to free ports
-2. Start dev server (dev command from Execution Config) in background, redirecting output to a temp log file
-3. Poll for readiness (max 60 seconds, check every 3 seconds):
-   a. Check if the log file contains "Ready" or "started server on" or "compiled"
-   b. If found, proceed to step 4
-   c. If process exited, read error output and go to failure handling
-   d. After 60 seconds without ready signal, try curl as fallback
-4. Verify server responds: curl the root URL, expect HTTP 200 or 3xx
-```
+Summary: run kill command → start dev server (background, log to file) → poll log up to 60s
+for ready signal → curl key routes, verify HTTP 200 AND inspect body for expected content /
+absence of error strings → max 3 fix-retry cycles with a different fix each time → mark
+BLOCKED if still failing (do NOT accept "environment limitation" as a reason to skip).
 
-**Why polling instead of fixed sleep:** In proot-distro ARM64, Next.js Webpack compilation
-takes 25-30s+ (vs ~5s natively). A fixed `sleep 30` is either too short (500 on first
-request) or too long (wastes time on fast systems). Polling the log for "Ready" adapts
-to actual compilation time.
-
-**If dev server fails to start:**
-
-1. Read the error output carefully
-2. Diagnose the root cause (port conflict, missing dependency, system call error,
-   config issue, symlink problem, etc.)
-3. FIX the root cause — do not skip this step:
-   - Port conflict → kill the process and retry
-   - System call error → patch the problematic code (e.g., wrap in try/catch)
-   - Config error → fix the config
-   - Missing dependency → install it
-   - Symlink issue → try without Turbopack, or fix the symlink
-4. Retry starting the dev server
-5. Max 3 fix-and-retry cycles. Each cycle must try a DIFFERENT fix.
-6. If still failing after 3 distinct fixes: mark as BLOCKED, report to user with
-   full error output and what was tried. Do NOT proceed to Step 5.3.
-
-**CRITICAL: Do NOT accept "environment limitation" as an excuse to skip this step.
-If the standard dev command fails, try alternatives:**
-
-- Remove `--turbopack` flag (Turbopack has known issues in some environments)
-- Patch system call failures (e.g., `os.networkInterfaces()` → wrap in try/catch)
-- Use a static file server on the build output as a fallback
-- Try a different port
-
-**The dev server must be running before proceeding to Step 5.3.**
-
-### Step 5.2.5: Runtime Content Verification (Don't Trust Test Counts)
-
-**Tests passing does NOT mean the app works. This step catches the gap.**
-
-Even if all tests pass with perfect scores, the running app can be broken due to:
-cached state, missing runtime dependencies, environment differences, or test coverage gaps.
-
-1. With the dev server running, use Playwright MCP `browser_snapshot`, `browser_take_screenshot`,
-   or `curl` to inspect actual rendered content:
-
-2. For each key route modified by this task:
-   a. Fetch the page content (curl with `-L` to follow redirects)
-   b. Verify the response body contains:
-      - Expected text content (headings, labels, data)
-      - Expected HTML structure (key components, navigation elements)
-      - NO error messages ("Internal Server Error", "Error", stack traces, "undefined")
-      - NO empty body or loading-spinner-only state
-   c. If using Playwright MCP: `browser_navigate` to the route, then `browser_snapshot`
-      to capture the accessibility tree. Verify components render correctly.
-
-3. Compare what you see against the acceptance criteria:
-   - For each criterion, can you point to specific rendered content that proves it?
-   - If a criterion says "user can see X" — verify X actually appears in the snapshot
-
-4. If content verification reveals issues that tests missed:
-   - Fix the issue FIRST
-   - Then write a test that would have caught it
-   - Re-run all tests to confirm
-   - Log in session learnings: "Tests missed [X] — added test for it"
-
-5. **This step is BLOCKING. Do NOT proceed to Step 5.3 if content verification fails.**
+Tests passing does NOT mean the app works — content verification catches the gap. For each
+key route modified by this task, verify actual rendered content matches acceptance criteria.
+If Playwright MCP is available in context, use `browser_navigate` + `browser_snapshot` for
+richer verification. **This step is BLOCKING. Do NOT proceed to Step 5.3 if it fails.**
 
 ### Step 5.3: Route Health Check (MANDATORY)
 
@@ -476,13 +382,7 @@ cached state, missing runtime dependencies, environment differences, or test cov
    - Convert file paths to URL paths (e.g., `app/[locale]/product/page.tsx` → `/en/product/`)
    - Include all locale variants (e.g., `/en/product/`, `/pt-br/product/`)
 
-2. Curl each route (follow redirects with `-L`):
-   ```bash
-   for route in [ALL_ROUTES]; do
-     code=$(curl -sL -o /dev/null -w "%{http_code}" "http://localhost:PORT${route}")
-     echo "$route → $code"
-   done
-   ```
+2. Curl each route with `curl -sL -o /dev/null -w "%{http_code}"` (follow redirects), printing `"$route → $code"` for each.
 
 3. **ALL routes must return 200.** If any route returns 404, 500, or other error:
    - Investigate the cause (missing page, broken import, runtime error)
@@ -603,25 +503,7 @@ After all verification passes, kill the dev server:
 
 ### Step 5.9: Final Gate — Verification Summary
 
-Present this summary. ALL items must show PASS:
-
-```
-## Phase 5: Live Verification Results
-
-| Check                    | Result      | Details                        |
-|--------------------------|-------------|--------------------------------|
-| Build                    | PASS/FAIL   | exit code, error count         |
-| Lint                     | PASS/FAIL   | file count, issue count        |
-| Types                    | PASS/FAIL   | exit code, error count         |
-| Tests                    | PASS/FAIL   | pass/fail count                |
-| Dev Server               | PASS/FAIL   | port, startup time             |
-| Content Verification     | PASS/FAIL   | routes checked, content found  |
-| Route Health (N routes)  | PASS/FAIL   | routes passing / total         |
-| Playwright E2E           | PASS/FAIL   | tests pass/fail, screenshots   |
-| Console Errors           | PASS/FAIL   | error count (must be 0)        |
-| Plan Completeness        | PASS/FAIL   | tasks done/total, criteria met |
-| Regression Scan          | PASS/FAIL   | issues found                   |
-```
+Present this summary. ALL items must show PASS. Use the table template in `~/.claude/skills/plan-build-test/refs/final-gate-template.md`.
 
 **If ALL items show PASS:**
 → "All live verification passed. Dev server tested with N routes returning 200,
@@ -640,75 +522,11 @@ Present this summary. ALL items must show PASS:
 
 ## Phase 6: Learning & Self-Improvement
 
-Follow the **Self-Improvement Protocol** from CLAUDE.md AND the `/compound` skill's Steps 7-8 (cross-project promotion).
-
-### Step 6.1: Persist New Knowledge
-
-For issues that required multiple attempts, revealed unknown patterns, or were caused by environment issues — add to project knowledge files.
-
-### Step 6.2: Cross-Project Evolution (from /compound Steps 7-8)
-
-1. **Update error registry:** Add any new errors to `~/.claude/evolution/error-registry.json`
-2. **Update model performance:** Record model outcomes in `~/.claude/evolution/model-performance.json`
-3. **Check adaptation thresholds:** If model performance data suggests upgrade/downgrade, report to user
-4. **Log system changes:** If any skill/agent/hook was modified, log in `~/.claude/evolution/workflow-changelog.md`
-5. **Write session postmortem (MANDATORY — never skip):** Use the Write tool to create `~/.claude/evolution/session-postmortems/${TS}_${PROJECT_NAME}.md` where `TS=$(date +%Y-%m-%d_%H%M)`. This is the foundation for trend analysis in `/workflow-audit` — never skip. See `/compound` skill Step 8 for the full template. Do NOT overwrite existing postmortem files.
+After Phase 5 passes, invoke `/compound` — it handles all learning capture (error-registry, model-performance, session-postmortem, workflow-changelog). Compound is the single authority for learning capture.
 
 ### Step 6.3: Session Report
 
-```
-## Build Complete
-
-### Work Summary
-- Task files processed: N
-- Total items completed: M
-- Items failed/skipped: X
-- Parallel batches executed: B
-
-### Parallelism Report
-- Tasks run in parallel: N (across B batches via worktrees)
-- Tasks run sequentially: M
-- Merge conflicts encountered: X (resolved: Y)
-
-### Model Usage
-- haiku: N tasks (first-try success: X/N)
-- sonnet: M tasks (first-try success: X/M)
-- opus: X tasks (first-try success: X/X)
-
-### Error Categories
-- [CATEGORY]: N occurrences → [brief summary]
-
-### Metrics
-- Total retries: N
-- Verification gates that caught bugs: [list]
-- Phase 5 duration: Ns
-- Retry budget by category: transient=N, logic=N, environment=N, config=N
-
-### Files Modified
-- `path/to/file.ts` (+N/-M lines)
-
-### Verification Results (Phase 5 — Live Verification)
-- Build: PASS/FAIL (exit code)
-- Lint: PASS/FAIL (file count, issue count)
-- Types: PASS/FAIL (exit code)
-- Tests: PASS/FAIL (N passing, M failing)
-- Dev Server: PASS/FAIL (port, startup method)
-- Content Verification: PASS/FAIL (routes checked, content found)
-- Route Health: PASS/FAIL (N/M routes returning 200)
-- Playwright E2E: PASS/FAIL (N tests, M screenshots, X console errors)
-- Regression Scan: PASS/FAIL
-
-### Evolution Updates
-- Error registry entries added/updated: N
-- Model performance data points recorded: N
-- Session postmortem written: yes/no
-
-### Task Files
-- `path/to/task/spec.md` — COMPLETED (via progress.json)
-
-### Next Step
-Run `/ship-test-ensure` when ready to deploy.
-```
+Present the session report using the template in `~/.claude/skills/plan-build-test/refs/session-report-template.md`.
 
 ### Step 6.5: Worktree & Artifact Cleanup
 

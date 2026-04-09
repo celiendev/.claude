@@ -63,9 +63,9 @@ All language-specific logic is centralized in one file:
 ~/.claude/hooks/post-edit-quality.sh     ← PostToolUse: auto-formatting (sources lib)
 ~/.claude/hooks/check-test-exists.sh     ← PreToolUse: TDD enforcement (sources lib)
 ~/.claude/hooks/check-invariants.sh      ← PostToolUse: invariant verification (sources lib)
-~/.claude/hooks/worktree-preflight.sh    ← Sprint prep: git + deps (sources lib)
-~/.claude/hooks/block-dangerous.sh       ← PreToolUse: safety gates
-~/.claude/hooks/proot-preflight.sh       ← PreToolUse: proot environment detection
+~/.claude/hooks/scripts/worktree-preflight.sh ← Sprint prep: git + deps (sources lib)
+~/.claude/hooks/block-dangerous.sh           ← PreToolUse: safety gates
+(proot-preflight merged into session-start.sh)
 ```
 
 ### Hook → Library Function Mapping
@@ -252,7 +252,7 @@ is_entry_point() {
 
 2. **Test worktree-preflight**: Run it in a project directory and verify dependency detection:
    ```bash
-   bash ~/.claude/hooks/worktree-preflight.sh
+   bash ~/.claude/hooks/scripts/worktree-preflight.sh
    ```
 
 3. **Optionally add to worktree-preflight.sh**: If the language needs specific `.gitignore` entries or dependency management in the worktree bootstrap, add a case block there.
