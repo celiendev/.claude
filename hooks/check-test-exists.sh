@@ -77,6 +77,7 @@ esac
 # Skip pure type/interface files in domain/types directories (no runtime behavior)
 case "$FILE_PATH" in
   */domain/types/*.ts|*/domain/types/index.ts) exit 0 ;;
+  */domain/*.types.ts) exit 0 ;;
 esac
 
 # Skip CSS/style-only files

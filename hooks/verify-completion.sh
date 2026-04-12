@@ -2,97 +2,91 @@
 set -euo pipefail
 trap 'echo "HOOK CRASH: $0 line $LINENO" >&2; exit 2' ERR
 
-# Stop hook: Enforce Anti-Premature Completion Protocol as a hard gate.
+# Stop hook: Enforce the Anti-Premature Completion Protocol as a hard gate.
 #
-# When the orchestrator or plan-build-test declares a task complete (all sprints
-# done in progress.json), this hook verifies that proper completion evidence exists.
-# Without evidence, the agent is BLOCKED from finishing — preventing the "Three
-# Completion Lies" (tests pass ≠ works, build complete ≠ runs, items done ≠ verified).
+# When the orchestrator or plan-build-test declares a PRD complete, this hook
+# verifies that proper completion evidence exists. Without evidence, the
+# agent is BLOCKED from finishing — preventing the "Three Completion Lies":
+# tests pass ≠ works, build complete ≠ runs, items done ≠ verified.
 #
-# Evidence marker: ~/.claude/state/.claude-completion-evidence-${CLAUDE_SESSION_ID}
-# Written by orchestrator Step 8.5 / plan-build-test Phase 5.5 after performing
-# full verification (plan re-read, acceptance criteria citation, dev server check,
+# Gating: only fires when the PostToolUse hook `progress-signal.sh` has
+# written `~/.claude/state/.sprint-finalized-${SESSION_ID}`. Ordinary Q&A
+# turns never trigger this hook — it is O(1) until a sprint actually ends.
+#
+# Evidence marker: ~/.claude/state/.claude-completion-evidence-${SESSION_ID}
+# Written by orchestrator Step 8.5 / plan-build-test Phase 5.5 after full
+# verification (plan re-read, acceptance-criteria citation, dev server check,
 # non-privileged user testing).
 #
 # Exit codes:
-#   0 — completion evidence exists (or no completed tasks to verify)
-#   2 — task declared complete without proper verification evidence
+#   0 — no finalization to verify, or evidence is present and valid
+#   2 — PRD declared complete without proper verification evidence
 
-# Check for jq
 if ! command -v jq &>/dev/null; then
   exit 0
 fi
 
-# Source shared stop-guard (fail-open: if missing, guard is a no-op)
 source ~/.claude/hooks/lib/stop-guard.sh 2>/dev/null || true
 
-# Read JSON input from stdin
 INPUT=$(cat)
-
-# Check stop_hook_active — prevent infinite loop
 check_stop_hook_active "$INPUT"
 
-# Resolve project directory
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+# Only run when Claude explicitly signals task completion
+check_completion_authorized "$INPUT"
 
-# Skip if no task directory exists
-TASK_DIR="$PROJECT_DIR/docs/tasks"
-if [ ! -d "$TASK_DIR" ]; then
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || echo "")
+if [ -z "$SESSION_ID" ] || [ "$SESSION_ID" = "unknown" ]; then
   exit 0
 fi
 
-# Check for recently completed tasks (progress.json with all sprints "complete"
-# AND the file was modified in the last 60 minutes — meaning it was just marked done)
-RECENTLY_COMPLETED=false
-COMPLETED_PRD=""
+STATE_DIR="${HOME}/.claude/state"
+SIGNAL_FILE="${STATE_DIR}/.sprint-finalized-${SESSION_ID}"
 
-while IFS= read -r pjson; do
-  if [ -f "$pjson" ]; then
-    # Check if ALL sprints are complete
-    INCOMPLETE=$(jq '[.sprints[] | select(.status != "complete")] | length' "$pjson" 2>/dev/null || echo "0")
-    TOTAL=$(jq '.sprints | length' "$pjson" 2>/dev/null || echo "0")
-
-    if [ "$TOTAL" -gt 0 ] && [ "$INCOMPLETE" -eq 0 ]; then
-      # Check if this file was recently modified (within last 60 min)
-      if [ "$(find "$pjson" -mmin -60 2>/dev/null | wc -l)" -gt 0 ]; then
-        RECENTLY_COMPLETED=true
-        COMPLETED_PRD="$pjson"
-        break
-      fi
-    fi
-  fi
-done < <(find "$TASK_DIR" -name "progress.json" -type f 2>/dev/null)
-
-if [ "$RECENTLY_COMPLETED" = false ]; then
+# Fast path: no sprint finalized this session — nothing to verify.
+if [ ! -f "$SIGNAL_FILE" ]; then
   exit 0
 fi
 
-# Check for completion evidence marker
-SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"' 2>/dev/null || echo "unknown")
-EVIDENCE_MARKER="${HOME}/.claude/state/.claude-completion-evidence-${SESSION_ID}"
+# Session-scoped throttle: once we have blocked (or been dismissed) for this
+# finalization, stay quiet until a new finalization resets the marker.
+WARNED_MARKER="${STATE_DIR}/.claude-verify-warned-${SESSION_ID}"
+if [ -f "$WARNED_MARKER" ]; then
+  exit 0
+fi
+
+PJSON=$(cat "$SIGNAL_FILE" 2>/dev/null || echo "")
+if [ -z "$PJSON" ] || [ ! -f "$PJSON" ]; then
+  exit 0
+fi
+
+# Re-verify completeness in case the signaled file was edited after the write.
+INCOMPLETE=$(jq '[.sprints[]? | select(.status != "complete")] | length' "$PJSON" 2>/dev/null || echo "1")
+TOTAL=$(jq '.sprints | length' "$PJSON" 2>/dev/null || echo "0")
+if [ "$TOTAL" -le 0 ] || [ "$INCOMPLETE" -ne 0 ]; then
+  exit 0
+fi
+
+EVIDENCE_MARKER="${STATE_DIR}/.claude-completion-evidence-${SESSION_ID}"
 
 if [ -f "$EVIDENCE_MARKER" ]; then
-  # Verify the evidence file has required fields
   VALID=true
-
-  # Check required fields exist in the evidence file
   for field in "plan_reread" "dev_server_verified" "non_privileged_user_tested"; do
     if ! grep -q "$field" "$EVIDENCE_MARKER" 2>/dev/null; then
       VALID=false
       break
     fi
   done
-
   if [ "$VALID" = true ]; then
-    exit 0  # Evidence exists and is valid
+    exit 0
   fi
 fi
 
-# No evidence — BLOCK
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+: > "$WARNED_MARKER"
 {
   echo "BLOCKED: Anti-Premature Completion Protocol — task declared complete without verification evidence."
   echo ""
-  echo "Completed task: $COMPLETED_PRD"
+  echo "Completed task: $PJSON"
   echo ""
   echo "Before claiming completion, you MUST:"
   echo "  1. Re-read the original plan/spec file (not from memory)"

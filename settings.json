@@ -4,7 +4,7 @@
     "NODE_OPTIONS": "--max-old-space-size=2048",
     "CHOKIDAR_USEPOLLING": "true",
     "WATCHPACK_POLLING": "true",
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "62"
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "40"
   },
   "permissions": {
     "allow": [
@@ -34,6 +34,7 @@
     ],
     "deny": []
   },
+  "model": "sonnet",
   "hooks": {
     "PostToolUse": [
       {
@@ -50,6 +51,10 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/scan-secrets.sh"
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/progress-signal.sh"
           }
         ]
       }
@@ -64,14 +69,6 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/cleanup-artifacts.sh"
-          },
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/cleanup-worktrees.sh"
-          },
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/compound-reminder.sh"
           },
           {
             "type": "command",

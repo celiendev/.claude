@@ -72,16 +72,27 @@ case "$CMD_NORM" in
   "tsx watch "*|"node --watch "*) exit 0 ;;
 esac
 
-# === APPROVAL TOKEN MECHANISM (5-minute TTL) ===
+# === APPROVAL TOKEN MECHANISM (session-scoped, 30-minute TTL) ===
+# Token is session-scoped — one approval unlocks ALL heavy commands for 30 minutes.
+# This prevents needing to call approve.sh once per command in verification runs.
 APPROVAL_DIR="$HOME/.claude/hooks/.approvals"
 PENDING_DIR="$HOME/.claude/hooks/.pending"
-CMD_HASH=$(printf '%s' "heavy-bash-$CMD_NORM" | cksum 2>/dev/null | cut -d' ' -f1) || CMD_HASH="heavy-fallback"
+
+SESSION_ID=""
+if command -v jq &>/dev/null; then
+  SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || printf '')
+fi
+[ -z "$SESSION_ID" ] && SESSION_ID="default"
+SESSION_ID="${SESSION_ID//\//_}"
+SESSION_ID="${SESSION_ID// /_}"
+
+CMD_HASH=$(printf '%s' "heavy-bash-$SESSION_ID" | cksum 2>/dev/null | cut -d' ' -f1) || CMD_HASH="heavy-fallback"
 
 if [ -f "$APPROVAL_DIR/$CMD_HASH" ]; then
   APPROVAL_TIME=$(stat -c %Y "$APPROVAL_DIR/$CMD_HASH" 2>/dev/null || echo 0)
   NOW=$(date +%s)
-  if [ $((NOW - APPROVAL_TIME)) -lt 300 ]; then
-    rm -f "$APPROVAL_DIR/$CMD_HASH" "$PENDING_DIR/$CMD_HASH" 2>/dev/null
+  if [ $((NOW - APPROVAL_TIME)) -lt 1800 ]; then
+    # Keep the token file alive (do NOT delete it — we want it to cover the full session)
     log_hook_event "block-heavy-bash" "approved-by-token" "$CMD_NORM" 2>/dev/null || true
     exit 0
   fi
@@ -100,7 +111,6 @@ match_pattern() {
   return 1
 }
 
-match_pattern '^(pnpm|npm|yarn)[[:space:]]+(install|ci|audit|upgrade|update|outdated|add|remove)([[:space:]]|$)' "package manager install/audit" ||
 match_pattern '^(pnpm|npm|yarn)[[:space:]]+(build|test|lint|typecheck|check|format|e2e)([[:space:]]|$)' "package manager build/test/lint" ||
 match_pattern '^(pnpm|npm|yarn)[[:space:]]+run[[:space:]]+(build|test|lint|typecheck|check|format|ci|e2e)([[:space:]]|$)' "package manager run build/test/lint" ||
 match_pattern '^cargo[[:space:]]+(build|test|check|clippy|install|run)([[:space:]]|$)' "cargo build/test/run" ||

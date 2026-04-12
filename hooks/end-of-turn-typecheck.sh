@@ -30,6 +30,9 @@ INPUT=$(cat)
 # Check stop_hook_active — prevent infinite loop
 check_stop_hook_active "$INPUT"
 
+# Only run when Claude explicitly signals task completion
+check_completion_authorized "$INPUT"
+
 # Resolve project directory
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 

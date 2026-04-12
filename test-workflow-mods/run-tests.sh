@@ -336,9 +336,12 @@ UNIQUE_SESSION="test-session-$$"
 STATE_DIR="$HOME/.claude/state"
 mkdir -p "$STATE_DIR"
 rm -f "$STATE_DIR/.claude-completion-evidence-$UNIQUE_SESSION"
+# Set up both signal files required by the new signal-gated verify-completion.sh
+touch "$STATE_DIR/.stop-hooks-ok-$UNIQUE_SESSION"
+echo "$FIXTURES_DIR/project-completed/docs/tasks/test/feature/2026-03-16_1200-test/progress.json" > "$STATE_DIR/.sprint-finalized-$UNIQUE_SESSION"
 
-INPUT=$(make_stop_input)
-if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" CLAUDE_SESSION_ID="$UNIQUE_SESSION" "$HOOKS_DIR/verify-completion.sh" >/dev/null 2>&1; then
+INPUT=$(make_stop_input_with_session "$UNIQUE_SESSION")
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" "$HOOKS_DIR/verify-completion.sh" >/dev/null 2>&1; then
   fail "Allowed completion without evidence marker" "Should block"
 else
   EXIT_CODE=$?
@@ -372,8 +375,11 @@ plan_reread: true
 dev_server_verified: true
 EOF
 
-INPUT=$(make_stop_input)
-if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" CLAUDE_SESSION_ID="$UNIQUE_SESSION" "$HOOKS_DIR/verify-completion.sh" >/dev/null 2>&1; then
+# Reset warn marker and re-authorize for this test (4.3 consumed the signal and wrote the warn marker)
+rm -f "$STATE_DIR/.claude-verify-warned-$UNIQUE_SESSION"
+touch "$STATE_DIR/.stop-hooks-ok-$UNIQUE_SESSION"
+INPUT=$(make_stop_input_with_session "$UNIQUE_SESSION")
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" "$HOOKS_DIR/verify-completion.sh" >/dev/null 2>&1; then
   fail "Allowed completion with incomplete evidence" "Missing non_privileged_user_tested"
 else
   EXIT_CODE=$?
@@ -384,6 +390,8 @@ else
   fi
 fi
 rm -f "$STATE_DIR/.claude-completion-evidence-$UNIQUE_SESSION"
+rm -f "$STATE_DIR/.sprint-finalized-$UNIQUE_SESSION"
+rm -f "$STATE_DIR/.claude-verify-warned-$UNIQUE_SESSION"
 
 # ============================================================
 header "5. post-edit-quality.sh — Auto-Format (Biome/ESLint)"
@@ -558,7 +566,7 @@ else
 fi
 
 # 5.6: Stop hooks — all three present
-for stop_hook in "end-of-turn-typecheck" "compound-reminder" "verify-completion"; do
+for stop_hook in "end-of-turn-typecheck" "cleanup-artifacts" "verify-completion"; do
   if jq -e ".hooks.Stop[].hooks[] | select(.command | contains(\"$stop_hook\"))" "$SETTINGS" >/dev/null 2>&1; then
     pass "$stop_hook registered as Stop hook"
   else
@@ -2016,8 +2024,10 @@ ACTUAL_HOOKS=$(find "$HOOKS_DIR" -maxdepth 1 -name '*.sh' -executable -printf '%
 UNREGISTERED=""
 for hook_file in $ACTUAL_HOOKS; do
   # Skip utility files that are sourced, not registered
+  # Also skip hooks intentionally removed from settings.json (orchestrator-only or signal-gated)
   case "$hook_file" in
     retry-with-backoff.sh|validate-sprint-boundaries.sh|verify-worktree-merge.sh|worktree-preflight.sh|validate-i18n-keys.sh|approve.sh) continue ;;
+    authorize-stop-hooks.sh|cleanup-worktrees.sh|compound-reminder.sh) continue ;;
   esac
   if ! echo "$REGISTERED_HOOKS" | grep -q "$hook_file"; then
     UNREGISTERED="$UNREGISTERED $hook_file"
@@ -2044,11 +2054,13 @@ fi
 # Test 33.2: Completed task + no compound marker → exits 2 (block stop)
 COMPOUND_SESSION="test-compound-$$"
 rm -f "$STATE_DIR/.claude-compound-done-$COMPOUND_SESSION"
-# Reuse the project-completed fixture (has all-complete progress.json)
-touch "$FIXTURES_DIR/project-completed/docs/tasks/test/feature/2026-03-16_1200-test/progress.json"
+rm -f "$STATE_DIR/.claude-compound-warned-$COMPOUND_SESSION"
+# Write sprint-finalized signal pointing to the completed fixture progress.json
+PROGRESS_JSON="$FIXTURES_DIR/project-completed/docs/tasks/test/feature/2026-03-16_1200-test/progress.json"
+echo "$PROGRESS_JSON" > "$STATE_DIR/.sprint-finalized-$COMPOUND_SESSION"
 
-INPUT=$(make_stop_input)
-if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" CLAUDE_SESSION_ID="$COMPOUND_SESSION" "$HOOKS_DIR/compound-reminder.sh" >/dev/null 2>&1; then
+INPUT=$(make_stop_input_with_session "$COMPOUND_SESSION")
+if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" "$HOOKS_DIR/compound-reminder.sh" >/dev/null 2>&1; then
   fail "compound-reminder: allowed stop without compound marker"
 else
   EXIT_CODE=$?
@@ -2058,6 +2070,7 @@ else
     fail "compound-reminder: wrong exit code" "Expected 2, got $EXIT_CODE"
   fi
 fi
+rm -f "$STATE_DIR/.claude-compound-warned-$COMPOUND_SESSION"
 
 # Test 33.3: Completed task + compound marker exists → exits 0 (allow stop)
 touch "$STATE_DIR/.claude-compound-done-$COMPOUND_SESSION"
@@ -2068,6 +2081,7 @@ else
   fail "compound-reminder: blocked stop despite compound marker"
 fi
 rm -f "$STATE_DIR/.claude-compound-done-$COMPOUND_SESSION"
+rm -f "$STATE_DIR/.sprint-finalized-$COMPOUND_SESSION"
 
 # Test 33.4: Respects stop_hook_active flag → exits 0
 INPUT=$(make_stop_input_active)
@@ -2412,9 +2426,9 @@ else
   fail "CLAUDE.md missing >5 files delegation threshold"
 fi
 
-# 39.9: Enforcement rule exists (reading >3 files triggers delegation — Hook-enforced)
-if grep -q "Hook-enforced.*4th direct read\|4th direct read\|4th.*triggers" "$CLAUDE_MD_EXPANDED"; then
-  pass "CLAUDE.md has enforcement rule: reading >5 files → STOP and delegate"
+# 39.9: Enforcement rule exists (2nd direct read triggers delegation — Hook-enforced)
+if grep -q "Hook-enforced.*2nd direct read\|2nd direct read\|2nd.*soft-blocked" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md has enforcement rule: 2nd direct read → soft-block and delegate"
 else
   fail "CLAUDE.md missing enforcement rule for >5 files reading"
 fi
@@ -2576,14 +2590,14 @@ else
 fi
 
 # 42.2: Value is a known-good value for the per-window target policy
-# Policy: 128K→100K(78), 200K→125K(62), 1M→150K(15)
+# Policy: all windows target 80K: 128K→80K(62), 200K→80K(40), 1M→80K(8)
 CURRENT_PCT=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE // "unset"' "$SETTINGS")
 case "$CURRENT_PCT" in
-  15|16|62|63|78|79)
-    pass "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=$CURRENT_PCT is valid per-window target (1M=15, 200K=62, 128K=78)"
+  8|9|40|41|62|63)
+    pass "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=$CURRENT_PCT is valid per-window target (1M=8, 200K=40, 128K=62)"
     ;;
   *)
-    fail "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=$CURRENT_PCT is not a valid per-window target" "Expected: 15/16 (1M→150K), 62/63 (200K→125K), or 78/79 (128K→100K)"
+    fail "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=$CURRENT_PCT is not a valid per-window target" "Expected: 8/9 (1M→80K), 40/41 (200K→80K), or 62/63 (128K→80K)"
     ;;
 esac
 
@@ -2616,14 +2630,11 @@ else
   fail "set-compact.sh is not executable"
 fi
 
-# 42.7: set-compact.sh defines per-window targets (100000, 125000, 150000)
-if [ -f "$SET_COMPACT" ] \
-    && grep -q "100000" "$SET_COMPACT" \
-    && grep -q "125000" "$SET_COMPACT" \
-    && grep -q "150000" "$SET_COMPACT"; then
-  pass "set-compact.sh defines per-window targets (100000, 125000, 150000)"
+# 42.7: set-compact.sh defines per-window target (80000 — all windows target 80K)
+if [ -f "$SET_COMPACT" ] && grep -q "80000" "$SET_COMPACT"; then
+  pass "set-compact.sh defines per-window target (80000)"
 else
-  fail "set-compact.sh missing per-window targets (100000 / 125000 / 150000)"
+  fail "set-compact.sh missing per-window target (80000)"
 fi
 
 # 42.8: set-compact.sh handles 200k preset
@@ -2677,14 +2688,14 @@ if [ -x "$SET_COMPACT" ]; then
   TMP2=$(mktemp)
   jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
   mv "$TMP2" "$SETTINGS"
-  if [ "$NEW_VALUE" = "15" ]; then
-    pass "set-compact.sh 1m writes 15% (150K target on 1M window)"
+  if [ "$NEW_VALUE" = "8" ]; then
+    pass "set-compact.sh 1m writes 8% (80K target on 1M window)"
   else
-    fail "set-compact.sh 1m wrote '$NEW_VALUE', expected 15"
+    fail "set-compact.sh 1m wrote '$NEW_VALUE', expected 8"
   fi
 fi
 
-# 42.15: set-compact.sh 200k preset produces expected value (62%, 125K target on 200K window)
+# 42.15: set-compact.sh 200k preset produces expected value (40%, 80K target on 200K window)
 if [ -x "$SET_COMPACT" ]; then
   ORIG_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
   "$SET_COMPACT" 200k >/dev/null 2>&1 || true
@@ -2692,14 +2703,14 @@ if [ -x "$SET_COMPACT" ]; then
   TMP2=$(mktemp)
   jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
   mv "$TMP2" "$SETTINGS"
-  if [ "$NEW_VALUE" = "62" ]; then
-    pass "set-compact.sh 200k writes 62% (125K target on 200K window)"
+  if [ "$NEW_VALUE" = "40" ]; then
+    pass "set-compact.sh 200k writes 40% (80K target on 200K window)"
   else
-    fail "set-compact.sh 200k wrote '$NEW_VALUE', expected 62"
+    fail "set-compact.sh 200k wrote '$NEW_VALUE', expected 40"
   fi
 fi
 
-# 42.16: set-compact.sh 128k preset produces expected value (78%, 100K target on 128K window)
+# 42.16: set-compact.sh 128k preset produces expected value (62%, 80K target on 128K window)
 if [ -x "$SET_COMPACT" ]; then
   ORIG_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
   "$SET_COMPACT" 128k >/dev/null 2>&1 || true
@@ -2707,10 +2718,10 @@ if [ -x "$SET_COMPACT" ]; then
   TMP2=$(mktemp)
   jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
   mv "$TMP2" "$SETTINGS"
-  if [ "$NEW_VALUE" = "78" ]; then
-    pass "set-compact.sh 128k writes 78% (100K target on 128K window)"
+  if [ "$NEW_VALUE" = "62" ]; then
+    pass "set-compact.sh 128k writes 62% (80K target on 128K window)"
   else
-    fail "set-compact.sh 128k wrote '$NEW_VALUE', expected 78"
+    fail "set-compact.sh 128k wrote '$NEW_VALUE', expected 62"
   fi
 fi
 
@@ -2718,13 +2729,11 @@ fi
 header "43. CLAUDE.md — Per-Window Autocompact Policy Documented"
 # ============================================================
 
-# 43.1: CLAUDE.md documents the per-window token targets (100K, 125K, 150K)
-if grep -q "100K" "$CLAUDE_MD_EXPANDED" \
-   && grep -q "125K" "$CLAUDE_MD_EXPANDED" \
-   && grep -q "150K" "$CLAUDE_MD_EXPANDED"; then
-  pass "CLAUDE.md documents per-window targets (100K / 125K / 150K)"
+# 43.1: CLAUDE.md documents the per-window token target (80K — all windows)
+if grep -q "80K" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md documents per-window target (80K)"
 else
-  fail "CLAUDE.md missing one of the per-window targets (100K, 125K, 150K)"
+  fail "CLAUDE.md missing per-window target (80K)"
 fi
 
 # 43.2: CLAUDE.md mentions autocompact
@@ -2804,11 +2813,11 @@ else
   fail "session-start.sh does not reference CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
 fi
 
-# 44.4: session-start.sh defines per-window targets (125000 for 200K, 150000 for 1M)
-if [ -f "$SESSION_START" ] && grep -q "125000" "$SESSION_START" && grep -q "150000" "$SESSION_START"; then
-  pass "session-start.sh defines per-window targets (125000 and 150000)"
+# 44.4: session-start.sh defines per-window target (80000 — all windows target 80K)
+if [ -f "$SESSION_START" ] && grep -q "80000" "$SESSION_START"; then
+  pass "session-start.sh defines per-window target (80000)"
 else
-  fail "session-start.sh missing per-window target values (125000 or 150000)"
+  fail "session-start.sh missing per-window target values (80000)"
 fi
 
 # 44.5: session-start.sh parses model.id from input
@@ -2854,10 +2863,10 @@ if [ -x "$SESSION_START" ]; then
   TMP2=$(mktemp)
   jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
   mv "$TMP2" "$SETTINGS"
-  if [ "$NEW_VALUE" = "15" ]; then
-    pass "session-start.sh auto-corrects 62→15 for 1M model (150K target on 1M window)"
+  if [ "$NEW_VALUE" = "8" ]; then
+    pass "session-start.sh auto-corrects 62→8 for 1M model (80K target on 1M window)"
   else
-    fail "session-start.sh failed to auto-correct for 1M model (got '$NEW_VALUE', expected '15')"
+    fail "session-start.sh failed to auto-correct for 1M model (got '$NEW_VALUE', expected '8')"
   fi
 fi
 
@@ -2872,30 +2881,30 @@ if [ -x "$SESSION_START" ]; then
   TMP2=$(mktemp)
   jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
   mv "$TMP2" "$SETTINGS"
-  if [ "$NEW_VALUE" = "62" ]; then
-    pass "session-start.sh auto-corrects 15→62 for 200K model (125K target on 200K window)"
+  if [ "$NEW_VALUE" = "40" ]; then
+    pass "session-start.sh auto-corrects 15→40 for 200K model (80K target on 200K window)"
   else
-    fail "session-start.sh failed to auto-correct for 200K model (got '$NEW_VALUE', expected '62')"
+    fail "session-start.sh failed to auto-correct for 200K model (got '$NEW_VALUE', expected '40')"
   fi
 fi
 
-# 44.11: Behavioral test — hook preserves correct value (15 for 1M)
+# 44.11: Behavioral test — hook preserves correct value (8 for 1M)
 if [ -x "$SESSION_START" ]; then
   ORIG_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
   TMP=$(mktemp)
-  jq '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = "15"' "$SETTINGS" > "$TMP"
+  jq '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = "8"' "$SETTINGS" > "$TMP"
   mv "$TMP" "$SETTINGS"
   OUTPUT=$(echo '{"model":{"id":"claude-opus-4-6[1m]"}}' | CLAUDE_PROJECT_DIR=/tmp "$SESSION_START" 2>&1 || true)
   NEW_VALUE=$(jq -r '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE' "$SETTINGS")
   TMP2=$(mktemp)
   jq --arg v "$ORIG_VALUE" '.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = $v' "$SETTINGS" > "$TMP2"
   mv "$TMP2" "$SETTINGS"
-  if [ "$NEW_VALUE" = "15" ] && ! echo "$OUTPUT" | grep -q "auto-corrected"; then
-    pass "session-start.sh is quiet when 1M env matches expected (15)"
-  elif [ "$NEW_VALUE" = "15" ]; then
-    pass "session-start.sh preserves correct 1M value (15)"
+  if [ "$NEW_VALUE" = "8" ] && ! echo "$OUTPUT" | grep -q "auto-corrected"; then
+    pass "session-start.sh is quiet when 1M env matches expected (8)"
+  elif [ "$NEW_VALUE" = "8" ]; then
+    pass "session-start.sh preserves correct 1M value (8)"
   else
-    fail "session-start.sh corrupted matching 1M value (got '$NEW_VALUE', expected '15')"
+    fail "session-start.sh corrupted matching 1M value (got '$NEW_VALUE', expected '8')"
   fi
 fi
 
@@ -2915,13 +2924,11 @@ else
   fail "rules/context-engineering.md missing"
 fi
 
-# 45.2: mentions per-window targets (100K, 125K, 150K)
-if grep -q "100K" "$CTX_RULES" \
-   && grep -q "125K" "$CTX_RULES" \
-   && grep -q "150K" "$CTX_RULES"; then
-  pass "context-engineering rules document per-window targets (100K / 125K / 150K)"
+# 45.2: mentions per-window target (80K)
+if grep -q "80K" "$CTX_RULES"; then
+  pass "context-engineering rules document per-window target (80K)"
 else
-  fail "context-engineering rules missing per-window targets"
+  fail "context-engineering rules missing per-window target (80K)"
 fi
 
 # 45.3: mentions autocompact

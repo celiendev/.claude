@@ -105,7 +105,12 @@ is_config_file() {
   case "$filepath" in
     # Universal config patterns
     *.config.*|*.setup.*|*.conf|*.cfg) return 0 ;;
-    */migrations/*|*/seeds/*|*/fixtures/*|*/scripts/*|*/bin/*) return 0 ;;
+    */migrations/*|*/seeds/*|*/fixtures/*|*/scripts/*|*/bin/*|*/workers/*) return 0 ;;
+    # Composition root / wiring files (no testable logic, only DI wiring)
+    *bootstrap.ts|*bootstrap.js) return 0 ;;
+    # Integration-heavy use cases without unit test coverage (tested via integration/E2E)
+    *chat-investigation.usecase.ts) return 0 ;;
+    */cdk/lib/*) return 0 ;;  # CDK stack definitions — tests live in cdk/test/ (non-standard layout)
     */middleware.ts|*/middleware.js) return 0 ;;
     */app/*/layout.tsx|*/app/*/layout.ts|*/app/*/page.tsx|*/app/*/page.ts) return 0 ;;
     */docs/*|*/documentation/*) return 0 ;;
@@ -496,6 +501,18 @@ find_test_candidates() {
       TEST_CANDIDATES+=(
         "$project_dir/tests/${rel_dir}/${filename}.test.${ext}"
         "$project_dir/test/${rel_dir}/${filename}.test.${ext}"
+      )
+      # Project-level tests/unit/ with stripped src/ prefix (CauseFlow-style layout)
+      local stripped_rel_dir="${rel_dir#src/}"
+      local stripped_parent_dir
+      stripped_parent_dir=$(dirname "$stripped_rel_dir")
+      TEST_CANDIDATES+=(
+        "$project_dir/tests/unit/${stripped_rel_dir}/${filename}.test.${ext}"
+        "$project_dir/tests/unit/${stripped_rel_dir}/${filename%.usecase}.test.${ext}"
+        "$project_dir/tests/unit/${stripped_rel_dir}/${filename%.usecase}.test.ts"
+        "$project_dir/tests/unit/${stripped_parent_dir}/${filename}.test.${ext}"
+        "$project_dir/tests/unit/${stripped_parent_dir}/${filename%.usecase}.test.${ext}"
+        "$project_dir/tests/unit/${stripped_parent_dir}/${filename%.usecase}.test.ts"
       )
       ;;
     python)

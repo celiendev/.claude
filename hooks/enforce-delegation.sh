@@ -10,14 +10,15 @@ trap 'echo "HOOK CRASH: $0 line $LINENO" >&2; exit 0' ERR
 #   - Counts Read/Grep/Glob calls per session in ~/.claude/hooks/state/main-reads-<session>
 #   - Counts Bash read-style commands (cat/head/tail/grep/rg/find/ls/wc/awk/sed/jq/...)
 #   - Resets counter on Agent/Task tool call (main agent delegated — good signal)
-#   - Soft-blocks at count >= 4 with SOFT_BLOCK_APPROVAL_NEEDED
+#   - Soft-blocks at count >= 3 with SOFT_BLOCK_APPROVAL_NEEDED
+#   - Immediately soft-blocks any Read of a big file (>= 51200 bytes) regardless of count
 #   - Exempts maintenance paths (~/.claude/, MEMORY.md, session-learnings, INVARIANTS.md, etc.)
 #   - Bypasses when sub-agent markers (env var or worktree cwd) are detected
 #
-# Threshold rationale: 3 free reads, 4th triggers. Matches the "main agent is
-# an orchestrator, not a worker" principle from the context-engineering article.
-# Three quick lookups are fine; the 4th is the sign the main agent is doing
-# work it should delegate.
+# Threshold rationale: 1 free read, 2nd triggers. Main agent is an orchestrator,
+# not a worker — one targeted lookup is fine; a 2nd is the sign it should
+# delegate. Big files (>=50KB) are always delegated regardless of count, to protect
+# the 80K token context budget.
 #
 # Exit codes: always 0 (JSON decision goes to stdout per Claude Code hook contract).
 
@@ -195,10 +196,24 @@ if is_exempt_path "$READ_TARGET"; then
   exit 0
 fi
 
+# === BIG FILE CHECK (Read tool only, non-exempt paths) ===
+# Files >= 50KB are immediately soft-blocked regardless of counter — reading a
+# large file in the main agent can consume 15-20K tokens from the 80K budget.
+BIG_FILE_THRESHOLD=51200  # 50KB
+if [ "$TOOL_NAME" = "Read" ] && [ -n "$READ_TARGET" ] && [ -f "$READ_TARGET" ]; then
+  FILE_SIZE=$(stat -c %s "$READ_TARGET" 2>/dev/null || echo 0)
+  if [ "$FILE_SIZE" -ge "$BIG_FILE_THRESHOLD" ]; then
+    log_hook_event "enforce-delegation" "big-file-blocked" "size=${FILE_SIZE} path=$READ_TARGET" 2>/dev/null || true
+    BIG_REASON="File '$READ_TARGET' is ${FILE_SIZE} bytes (threshold: ${BIG_FILE_THRESHOLD}B / 50KB). Big files must be read by a sub-agent to keep the main 80K-token context budget intact. Delegate to an Explore sub-agent (Agent tool, subagent_type=Explore, model=haiku or sonnet)."
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"SOFT_BLOCK_APPROVAL_NEEDED: %s"}}\n' "$BIG_REASON"
+    exit 0
+  fi
+fi
+
 # === INCREMENT COUNTER (atomic, flock-serialized) ===
 CURRENT=$(atomic_increment_counter)
 
-THRESHOLD=4
+THRESHOLD=5
 
 if [ "$CURRENT" -lt "$THRESHOLD" ]; then
   log_hook_event "enforce-delegation" "count-$CURRENT" "$TOOL_NAME:$READ_TARGET" 2>/dev/null || true
@@ -211,7 +226,7 @@ CMD_HASH=$(printf '%s' "delegation-$SESSION_ID" | cksum 2>/dev/null | cut -d' ' 
 if [ -f "$APPROVAL_DIR/$CMD_HASH" ]; then
   APPROVAL_TIME=$(stat -c %Y "$APPROVAL_DIR/$CMD_HASH" 2>/dev/null || echo 0)
   NOW=$(date +%s)
-  if [ $((NOW - APPROVAL_TIME)) -lt 300 ]; then
+  if [ $((NOW - APPROVAL_TIME)) -lt 1800 ]; then
     rm -f "$APPROVAL_DIR/$CMD_HASH" "$PENDING_DIR/$CMD_HASH" 2>/dev/null
     atomic_reset_counter  # Reset counter after approval — fresh slate
     log_hook_event "enforce-delegation" "approved-by-token" "count=$CURRENT" 2>/dev/null || true
@@ -221,7 +236,7 @@ if [ -f "$APPROVAL_DIR/$CMD_HASH" ]; then
 fi
 
 # === SOFT-BLOCK ===
-REASON="Main agent has done $CURRENT direct reads this turn (threshold=$THRESHOLD). The main agent is an orchestrator, not a worker — delegate to an Explore sub-agent (Agent tool, subagent_type=Explore, model=haiku) to keep context clean. Approve via AskUserQuestion + approve.sh only if delegation is genuinely not possible."
+REASON="Main agent has done $CURRENT direct reads this turn (threshold=$THRESHOLD). The main agent is an orchestrator, not a worker — more than 1 direct read must be delegated to an Explore sub-agent (Agent tool, subagent_type=Explore, model=haiku) to keep the 80K-token context budget intact. Approve via AskUserQuestion + approve.sh only if delegation is genuinely not possible."
 
 # Write hook-specific pending file with read-count context (preserved for approve.sh)
 mkdir -p "$PENDING_DIR" 2>/dev/null || true
