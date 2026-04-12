@@ -116,40 +116,28 @@ assert_allow "1st read allowed"
 assert_counter 1 "counter = 1 after 1st read"
 
 run_hook_read "/tmp/fake2.txt"
-assert_allow "2nd read allowed"
-assert_counter 2 "counter = 2 after 2nd read"
-
-run_hook_read "/tmp/fake3.txt"
-assert_allow "3rd read allowed (under threshold)"
-assert_counter 3 "counter = 3 after 3rd read"
-
-run_hook_read "/tmp/fake4.txt"
-assert_soft_block "4th read soft-blocked"
+assert_soft_block "2nd read soft-blocked (threshold=2)"
 
 # --- 2. Mixed tool counting ---
 section "Mixed tool types"
 cleanup
 run_hook_read "/tmp/a.txt"
-run_hook_grep "/tmp/dir"
-run_hook_glob "src/**/*.ts"
-assert_counter 3 "Read + Grep + Glob all counted (=3)"
+assert_counter 1 "Read counted (=1)"
 
-run_hook_read "/tmp/d.txt"
-assert_soft_block "4th read across mixed tools soft-blocked"
+run_hook_grep "/tmp/dir"
+assert_soft_block "2nd read (Grep) across mixed tools soft-blocked"
 
 # --- 3. Agent delegation resets counter ---
 section "Agent/Task call resets counter"
 cleanup
 run_hook_read "/tmp/a.txt"
-run_hook_read "/tmp/b.txt"
-run_hook_read "/tmp/c.txt"
-assert_counter 3 "counter = 3 before Agent call"
+assert_counter 1 "counter = 1 before Agent call"
 
 run_hook_agent
 assert_allow "Agent call allowed"
 assert_counter 0 "counter = 0 after Agent call"
 
-run_hook_read "/tmp/d.txt"
+run_hook_read "/tmp/b.txt"
 assert_allow "post-reset 1st read allowed"
 assert_counter 1 "counter restarts at 1 after Agent reset"
 
@@ -183,11 +171,10 @@ assert_counter 0 "progress.json exempt"
 
 # Verify we can still block on non-exempt paths after many exempt reads
 run_hook_read "/tmp/real1.txt"
+assert_allow "1st non-exempt read allowed after exempt reads"
+assert_counter 1 "non-exempt read increments counter"
 run_hook_read "/tmp/real2.txt"
-run_hook_read "/tmp/real3.txt"
-assert_counter 3 "non-exempt reads still count after many exempt reads"
-run_hook_read "/tmp/real4.txt"
-assert_soft_block "threshold still fires after exempt reads"
+assert_soft_block "threshold fires on 2nd non-exempt read after exempt reads"
 
 # --- 5. Bash read-style commands ---
 section "Bash read-style commands count"
@@ -195,11 +182,7 @@ cleanup
 run_hook_bash "cat /tmp/a.txt"
 assert_counter 1 "cat counted"
 run_hook_bash "head -20 /tmp/b.txt"
-assert_counter 2 "head counted"
-run_hook_bash "rg foo /tmp"
-assert_counter 3 "rg counted"
-run_hook_bash "find /tmp -name *.txt"
-assert_soft_block "find triggers soft-block on 4th read"
+assert_soft_block "head triggers soft-block on 2nd read (threshold=2)"
 
 # --- 6. Bash non-read commands are ignored ---
 section "Bash non-read commands do not count"
@@ -235,9 +218,7 @@ cleanup
 # Drive to blocked state
 run_hook_read "/tmp/a1.txt"
 run_hook_read "/tmp/a2.txt"
-run_hook_read "/tmp/a3.txt"
-run_hook_read "/tmp/a4.txt"
-assert_soft_block "drove to soft-block at 4 reads"
+assert_soft_block "drove to soft-block at 2 reads"
 
 # Plant an approval token (what approve.sh would do)
 mkdir -p "$APPROVAL_DIR"
@@ -276,7 +257,7 @@ for pid in "${PIDS[@]}"; do
   wait "$pid" 2>/dev/null || true
 done
 
-# The counter should equal exactly PARALLEL_N (or be >= 4 which triggers soft-block)
+# The counter should equal exactly PARALLEL_N (or be >= 2 which triggers soft-block)
 # What we care about: no lost updates. Without flock, some increments can be lost.
 # With flock, counter should be exactly PARALLEL_N.
 ACTUAL_COUNTER=0
@@ -289,6 +270,27 @@ if [ "$ACTUAL_COUNTER" -eq "$PARALLEL_N" ]; then
 else
   fail "flock: counter=$ACTUAL_COUNTER after $PARALLEL_N parallel increments (expected $PARALLEL_N — lost updates!)"
 fi
+
+cleanup
+
+# --- 11. Big file immediate block ---
+section "Big file (>=50KB) immediately soft-blocked"
+cleanup
+# Create a file >= 51200 bytes
+BIG_FILE=$(mktemp)
+dd if=/dev/zero bs=1024 count=52 2>/dev/null | tr '\0' 'A' > "$BIG_FILE"
+run_hook_read "$BIG_FILE"
+assert_soft_block "big file (52KB) immediately soft-blocked (counter=0)"
+assert_counter 0 "big file block does NOT increment counter"
+rm -f "$BIG_FILE"
+
+# Small file (under threshold) is not immediately blocked
+SMALL_FILE=$(mktemp)
+printf 'hello world\n' > "$SMALL_FILE"
+run_hook_read "$SMALL_FILE"
+assert_allow "small file (< 50KB) not immediately blocked"
+assert_counter 1 "small file increments counter normally"
+rm -f "$SMALL_FILE"
 
 cleanup
 

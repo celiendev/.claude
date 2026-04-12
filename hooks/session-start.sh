@@ -100,9 +100,9 @@ fi
 # Reads model.id from SessionStart input (if provided) and verifies that
 # CLAUDE_AUTOCOMPACT_PCT_OVERRIDE matches the target for the detected window.
 # Per-window targets (keep in sync with set-compact.sh and CLAUDE.md):
-#   128K window -> 100K target (78%)
-#   200K window -> 125K target (62%)
-#   1M   window -> 150K target (15%)
+#   128K window -> 80K target (62%)
+#   200K window -> 80K target (40%)
+#   1M   window -> 80K target  (8%)
 # If mismatched, auto-corrects settings.json (takes effect next session) and warns now.
 SETTINGS_FILE="$HOME/.claude/settings.json"
 if command -v jq &>/dev/null && [ -f "$SETTINGS_FILE" ]; then
@@ -115,11 +115,11 @@ if command -v jq &>/dev/null && [ -f "$SETTINGS_FILE" ]; then
   if echo "$MODEL_ID" | grep -q '\[1m\]'; then
     WINDOW=1000000
     WIN_LABEL="1M"
-    TARGET_TOKENS=150000
+    TARGET_TOKENS=80000
   else
     WINDOW=200000
     WIN_LABEL="200K"
-    TARGET_TOKENS=125000
+    TARGET_TOKENS=80000
   fi
 
   EXPECTED_PCT=$(( TARGET_TOKENS * 100 / WINDOW ))
