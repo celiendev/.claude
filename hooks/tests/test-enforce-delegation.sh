@@ -11,6 +11,10 @@ APPROVAL_DIR="$HOME/.claude/hooks/.approvals"
 PENDING_DIR="$HOME/.claude/hooks/.pending"
 TEST_SESSION="enforce-test-$$"
 
+# Tests use threshold=2 for speed; production default is 5.
+# The hook reads ENFORCE_DELEGATION_THRESHOLD from env.
+export ENFORCE_DELEGATION_THRESHOLD=2
+
 PASS=0
 FAIL=0
 ERRORS=()

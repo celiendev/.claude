@@ -40,6 +40,11 @@ fi
 # Check stop_hook_active — prevent infinite loop
 check_stop_hook_active "$INPUT"
 
+# Only run when Claude explicitly signals task completion — skips during
+# AskUserQuestion pauses, Monitor events, and intermediate turns. Keeps the
+# hook's per-turn cost at ~1ms when the agent is still working.
+check_completion_authorized "$INPUT"
+
 # ─── RESOLVE PROJECT DIRECTORY ─────────────────────────────────────────
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
@@ -146,9 +151,17 @@ while IFS= read -r line; do
     CURRENT_BRANCH=""
     IS_FIRST="false"
 
-    # The very first worktree entry is the main worktree — skip it
-    # We detect it by checking if it matches the PROJECT_DIR
-    if [ "$CURRENT_PATH" = "$PROJECT_DIR" ]; then
+    # The very first worktree entry is the main worktree — skip it.
+    # Detect via canonical path comparison (readlink resolves symlinks and
+    # trailing slashes, which a raw $PROJECT_DIR may have). Fallback to raw
+    # compare if readlink is unavailable.
+    _CANON_CURRENT="$CURRENT_PATH"
+    _CANON_PROJECT="$PROJECT_DIR"
+    if command -v readlink &>/dev/null; then
+      _CANON_CURRENT=$(readlink -f "$CURRENT_PATH" 2>/dev/null || echo "$CURRENT_PATH")
+      _CANON_PROJECT=$(readlink -f "$PROJECT_DIR" 2>/dev/null || echo "$PROJECT_DIR")
+    fi
+    if [ "$_CANON_CURRENT" = "$_CANON_PROJECT" ]; then
       IS_FIRST="true"
     fi
 

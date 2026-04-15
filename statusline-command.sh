@@ -6,8 +6,7 @@
 #   model   <name>  ·  $cost  ·  <duration>  ·  +added -removed
 #   dir     <path>  [·  worktree <name> [branch]]
 #   ctx     [███░░░░]  42%   84k / 200k
-#   5h      [███░]  30% (2h14m)     │     7d   [██░]  15% (4d2h)
-#   agent   sprint-executor [sonnet-4-6] (only shown when running as a subagent)
+#   5h      [███░]  30% (2h14m)     │     7d   [██░]  15% (4d2h)  (only shown for subscribers with active limits)
 
 input=$(cat)
 
@@ -48,12 +47,9 @@ five_resets=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at       // e
 week_pct=$(echo "$input"    | jq -r '.rate_limits.seven_day.used_percentage // empty')
 week_resets=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at       // empty')
 
-# agent / worktree (only present in specific contexts)
-agent_name=$(echo "$input"      | jq -r '.agent.name       // empty')
-agent_type=$(echo "$input"      | jq -r '.agent.type       // empty')
+# worktree (only present in worktree sessions)
 worktree=$(echo "$input"        | jq -r '.worktree.name    // empty')
 worktree_branch=$(echo "$input" | jq -r '.worktree.branch  // empty')
-session_name=$(echo "$input"    | jq -r '.session_name     // empty')
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -190,75 +186,8 @@ if [ -n "$five_pct" ] || [ -n "$week_pct" ]; then
     progress_bar "$week_int" 10 "$week_col"
     printf '  %s%d%%%s' "$W" "$week_int" "$N"
     [ -n "$week_resets" ] && printf ' %s(%s)%s' "$D" "$(fmt_resets "$week_resets")" "$N"
-    # extra-usage bar: always shown alongside the 7d bar.
-    # Maps 0-100% into 8 cells so it's always visible.
-    extra_width=8
-    printf '  %sExtra Usage%s ' "$M" "$N"
-    progress_bar "$week_int" "$extra_width" "$M"
-  else
+    else
     printf '%s7d    —%s' "$D" "$N"
-  fi
-  printf '\n'
-fi
-
-# ── line 5: agent (only shown when running as a subagent) ──────────────────
-if [ -n "$agent_name" ]; then
-  short_model=$(printf '%s' "$model_id" | sed 's/^claude-//')
-  [ -z "$short_model" ] && short_model="$model_id"
-
-  printf '%sagent%s  %s%s%s  %s[%s]%s' "$M" "$N" "$W" "$agent_name" "$N" "$C" "$short_model" "$N"
-  [ -n "$agent_type" ] && printf '  %s(%s)%s' "$D" "$agent_type" "$N"
-  [ -n "$worktree" ] && printf '  %swt:%s%s' "$Y" "$worktree" "$N"
-  printf '\n'
-fi
-
-# ── line 6: active sprints + worktrees (orchestrator view) ─────────────────
-# Scan docs/tasks for any progress.json with in-progress sprints, and count
-# active git worktrees as a proxy for running agent sessions.
-
-# Active sprints: find all progress.json files with at least one in_progress sprint
-active_sprints=""
-if command -v jq &>/dev/null && [ -n "$project_dir" ] && [ -d "$project_dir/docs/tasks" ]; then
-  while IFS= read -r pf; do
-    count=$(jq '[.sprints[]? | select(.status == "in_progress")] | length' "$pf" 2>/dev/null || echo 0)
-    if [ "$count" -gt 0 ] 2>/dev/null; then
-      prd_name=$(jq -r '.name // .title // empty' "$pf" 2>/dev/null || true)
-      [ -z "$prd_name" ] && prd_name=$(basename "$(dirname "$pf")")
-      active_sprints="${active_sprints}${prd_name}(${count}) "
-    fi
-  done < <(find "$project_dir/docs/tasks" -name "progress.json" 2>/dev/null)
-fi
-active_sprints="${active_sprints%% }"  # trim trailing space
-
-# Active worktrees: count linked worktrees (excludes main) as running agent sessions
-wt_count=0
-wt_names=""
-if command -v git &>/dev/null && [ -n "$project_dir" ] && [ -d "$project_dir/.git" ]; then
-  while IFS= read -r line; do
-    # `git worktree list --porcelain` lines: "worktree /path" entries
-    case "$line" in
-      worktree\ *)
-        wt_path="${line#worktree }"
-        # skip the main worktree (same as project_dir)
-        if [ "$wt_path" != "$project_dir" ]; then
-          wt_count=$(( wt_count + 1 ))
-          wt_names="${wt_names}$(basename "$wt_path") "
-        fi
-        ;;
-    esac
-  done < <(git -C "$project_dir" worktree list --porcelain 2>/dev/null)
-  wt_names="${wt_names%% }"
-fi
-
-if [ -n "$active_sprints" ] || [ "$wt_count" -gt 0 ]; then
-  printf '%sjobs %s' "$C" "$N"
-  if [ -n "$active_sprints" ]; then
-    printf ' %ssprint:%s %s%s%s' "$Y" "$N" "$W" "$active_sprints" "$N"
-  fi
-  if [ "$wt_count" -gt 0 ] 2>/dev/null; then
-    [ -n "$active_sprints" ] && printf '  %s·%s' "$D" "$N"
-    printf ' %s%d agent worktree%s%s' "$M" "$wt_count" "$([ "$wt_count" -ne 1 ] && echo s)" "$N"
-    [ -n "$wt_names" ] && printf ' %s(%s)%s' "$D" "$wt_names" "$N"
   fi
   printf '\n'
 fi

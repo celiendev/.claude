@@ -130,12 +130,33 @@ If you discover an **opportunity to improve unrelated code** (refactor, cleanup,
 
 ### Deterministic Safety via Hooks
 
-Hooks enforce the "Agent NEVER does" column at tool-call time. Hard blocks (deny): `rm -rf /`, `dd`, fork bombs. Soft blocks (interactive approval): destructive git, package-manager mismatch, 2nd direct file read, any big file read (>=50KB), heavy build/test commands.
-Implementation: `~/.claude/hooks/`. Test: `bash ~/.claude/hooks/tests/run-all.sh`.
+Hooks enforce the "Agent NEVER does" column at tool-call time. Hard blocks (deny): `rm -rf /`, `dd`, fork bombs. Soft blocks (interactive approval): destructive git, package-manager mismatch, direct file read past threshold (`ENFORCE_DELEGATION_THRESHOLD`, default 5), any big file read (>=50KB), heavy build/test commands.
+Implementation: `~/.claude/hooks/`. Test: `bash ~/.claude/hooks/tests/run-all.sh`. Tune friction via `ENFORCE_DELEGATION_THRESHOLD` env var (default 5: 4 free reads, 5th triggers).
 
 ### Soft Block Interactive Approval Protocol
 
 When a hook returns `SOFT_BLOCK_APPROVAL_NEEDED:` prefix: present reason to user, ask with AskUserQuestion, if approved run `~/.claude/hooks/approve.sh` then retry. NEVER tell user to run approve.sh manually.
+
+### Stop Hook Authorization Protocol (MANDATORY on task completion)
+
+Stop hooks (compound reminder, worktree cleanup, completion verification, end-of-turn typecheck, artifact cleanup) **only fire when Claude explicitly signals task completion**. They skip automatically on:
+- `AskUserQuestion` turns (agent is asking, not finishing)
+- Intermediate tool turns (agent is still working)
+- Recursive hook fire (`stop_hook_active=true`)
+
+The gate is a one-shot marker at `~/.claude/state/.stop-hooks-ok-<session_id>` — written by Claude, consumed by the first stop hook that runs.
+
+**When to authorize (MANDATORY):** immediately before your final summary response on a completed task — not when asking a clarifying question, not when pausing mid-task. Use the helper:
+
+```bash
+bash ~/.claude/hooks/authorize-stop-hooks.sh
+```
+
+This is the ONLY way the learning loop (compound), worktree cleanup, and completion verification ever run. Forgetting it means silently skipping them. Rule of thumb:
+
+- Final turn of a task → authorize, then summarize
+- AskUserQuestion / clarification / in-progress / error → do NOT authorize
+- After `/compound` finishes → do NOT re-authorize (it writes its own done marker)
 
 ---
 
@@ -177,7 +198,7 @@ The main agent is an **orchestrator**, not a worker. It MUST keep its context cl
 
 - **File scanning / dependency analysis** → `Explore` agent with `model: "haiku"`
 - **Open-ended codebase investigation** → `Explore` agent with `model: "sonnet"`
-- **Reading >1 file** to answer a question → pick haiku or sonnet per the two rules above. Hook-enforced: 2nd direct read is soft-blocked. Any single big file (>=50KB) is also immediately soft-blocked regardless of count.
+- **Reading files past threshold** to answer a question → pick haiku or sonnet per the two rules above. Hook-enforced: the `ENFORCE_DELEGATION_THRESHOLD`th direct read is soft-blocked (default 5 — 4 free reads, 5th triggers). Paths under `~/.claude/`, `MEMORY.md`, session-learnings, `INVARIANTS.md`, `.artifacts/`, `docs/tasks/`, sprint specs, project `CLAUDE.md`, and `AGENTS.md` are exempt and don't count. Any single big file (>=50KB) is also immediately soft-blocked regardless of count.
 - **Running any build / test / lint / typecheck / install command** → sub-agent. Hook-enforced: `pnpm build`, `cargo test`, `pytest`, `tsc`, `make test`, etc. are soft-blocked in the main agent. Dev servers remain allowed.
 - **Executing a sprint** with declared file boundaries → `sprint-executor` (sonnet, `isolation: worktree`)
 - **Reviewing code** after sprint implementation → `code-reviewer` (sonnet, read-only)
@@ -189,7 +210,7 @@ The main agent is an **orchestrator**, not a worker. It MUST keep its context cl
 
 - Playwright MCP browser interaction — browser state must stay with the orchestrator
 - Simple file edits (checkboxes, session-learnings, single-line fixes)
-- Bug investigation reading 1 targeted file (2nd triggers the hook; big files trigger immediately)
+- Bug investigation reading up to (threshold-1) targeted files (next one triggers the hook; big files trigger immediately)
 - Direct file reads when path is known AND file is under `~/.claude/`, a task spec, or `progress.json`
 - Approving soft-blocks via `approve.sh` (wrap in AskUserQuestion — never tell user to run it manually)
 
@@ -220,9 +241,9 @@ After 10+ data points per task type, `/compound` checks `~/.claude/evolution/mod
 4. **Verify:** Confirm the failing test now passes
 5. **Regress:** Add regression tests if root cause reveals broader risk
 
-### Mobile First (mandatory order for UI work)
+### Mobile First & Web/UI Rules
 
-1. Mobile (< 640px) → 2. Tablet (640-1024px) → 3. Desktop (1024-1280px) → 4. Wide (> 1280px)
+For projects with a web frontend or UI: mobile-first order (<640 → 640-1024 → 1024-1280 → >1280), web-specific security checklist (CSP/CORS/etc.), and performance targets (LCP/CLS/FID) live in `~/.claude/rules/web.md`. Import into your project's CLAUDE.md via `@~/.claude/rules/web.md` only when the stack includes a browser-facing UI — avoids loading web-only rules for backend/CLI/data projects.
 
 ### Rollback & Recovery Protocol
 
@@ -270,14 +291,6 @@ All tests passing. No unused imports/dead code. No console.logs. No duplication.
 - **Commits:** Atomic. Format: `<type>: <what changed>`. Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`
 - **Never force-push to main.** Always create PRs for non-trivial changes.
 - **All deploys go through CI/CD pipelines.** `/ship-test-ensure` creates branch → PR → merge → deploy.
-
-### Security Checklist
-
-Input sanitization (XSS), CSP headers, no sensitive data client-side, HTTPS, dependency audit, rate limiting, CORS, no tokens in frontend code.
-
-### Performance Targets
-
-LCP < 2s, CLS < 0.1, FID/INP < 200ms. WebP images with lazy loading. Font preload + swap. JS bundle < 200KB gzipped. SSG for content pages.
 
 ### Artifact Management
 

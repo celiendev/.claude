@@ -14,6 +14,23 @@ PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 WARNINGS=""
 
+# 0. Clean up stale hook state files from prior sessions (older than 1 day).
+# Prevents accumulation of main-reads-* counter files and similar session-scoped markers.
+# Runs first so the current session starts with fresh state.
+STALE_STATE_DIRS=("$HOME/.claude/hooks/state" "$HOME/.claude/state")
+for sd in "${STALE_STATE_DIRS[@]}"; do
+  [ -d "$sd" ] || continue
+  find "$sd" -maxdepth 1 -type f \( \
+      -name "main-reads-*" \
+      -o -name ".sprint-finalized-*" \
+      -o -name ".claude-compound-warned-*" \
+      -o -name ".claude-verify-warned-*" \
+      -o -name ".claude-compound-done-*" \
+      -o -name ".claude-completion-evidence-*" \
+      -o -name ".stop-hooks-ok-*" \
+    \) -mtime +1 -delete 2>/dev/null || true
+done
+
 # 1. Detect proot-distro environment
 IS_PROOT=false
 if uname -r 2>/dev/null | grep -q "PRoot-Distro" && [ "$(uname -m)" = "aarch64" ]; then

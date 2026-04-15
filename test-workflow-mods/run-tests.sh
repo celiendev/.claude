@@ -2058,6 +2058,8 @@ rm -f "$STATE_DIR/.claude-compound-warned-$COMPOUND_SESSION"
 # Write sprint-finalized signal pointing to the completed fixture progress.json
 PROGRESS_JSON="$FIXTURES_DIR/project-completed/docs/tasks/test/feature/2026-03-16_1200-test/progress.json"
 echo "$PROGRESS_JSON" > "$STATE_DIR/.sprint-finalized-$COMPOUND_SESSION"
+# Plant stop-hooks authorization marker (required by check_completion_authorized)
+touch "$STATE_DIR/.stop-hooks-ok-$COMPOUND_SESSION"
 
 INPUT=$(make_stop_input_with_session "$COMPOUND_SESSION")
 if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" "$HOOKS_DIR/compound-reminder.sh" >/dev/null 2>&1; then
@@ -2074,6 +2076,10 @@ rm -f "$STATE_DIR/.claude-compound-warned-$COMPOUND_SESSION"
 
 # Test 33.3: Completed task + compound marker exists → exits 0 (allow stop)
 touch "$STATE_DIR/.claude-compound-done-$COMPOUND_SESSION"
+# Re-write sprint-finalized signal (consumed by prior check_completion_authorized call)
+echo "$PROGRESS_JSON" > "$STATE_DIR/.sprint-finalized-$COMPOUND_SESSION"
+# Plant stop-hooks authorization marker again (one-shot, consumed by prior invocation)
+touch "$STATE_DIR/.stop-hooks-ok-$COMPOUND_SESSION"
 INPUT=$(make_stop_input_with_session "$COMPOUND_SESSION")
 if echo "$INPUT" | CLAUDE_PROJECT_DIR="$FIXTURES_DIR/project-completed" "$HOOKS_DIR/compound-reminder.sh" >/dev/null 2>&1; then
   pass "compound-reminder: allows stop when compound marker exists"
@@ -2426,11 +2432,11 @@ else
   fail "CLAUDE.md missing >5 files delegation threshold"
 fi
 
-# 39.9: Enforcement rule exists (2nd direct read triggers delegation — Hook-enforced)
-if grep -q "Hook-enforced.*2nd direct read\|2nd direct read\|2nd.*soft-blocked" "$CLAUDE_MD_EXPANDED"; then
-  pass "CLAUDE.md has enforcement rule: 2nd direct read → soft-block and delegate"
+# 39.9: Enforcement rule exists (parameterized — ENFORCE_DELEGATION_THRESHOLD default 5)
+if grep -q "ENFORCE_DELEGATION_THRESHOLD\|Hook-enforced.*2nd direct read\|2nd direct read\|2nd.*soft-blocked\|direct file read past threshold\|direct read.*soft-block" "$CLAUDE_MD_EXPANDED"; then
+  pass "CLAUDE.md has enforcement rule: direct-read threshold → soft-block and delegate"
 else
-  fail "CLAUDE.md missing enforcement rule for >5 files reading"
+  fail "CLAUDE.md missing enforcement rule for direct-read threshold"
 fi
 
 # 39.10: plan-build-test skill enforces orchestrator spawn for PRD+Sprint tasks

@@ -155,7 +155,8 @@ run_hook "pnpm build"
 assert_soft_block "drove to soft-block"
 
 mkdir -p "$APPROVAL_DIR"
-HASH=$(printf '%s' "heavy-bash-pnpm build" | cksum | cut -d' ' -f1)
+# Hash is session-scoped ("heavy-bash-<SESSION_ID>"). Test uses session_id="heavy-test".
+HASH=$(printf '%s' "heavy-bash-heavy-test" | cksum | cut -d' ' -f1)
 touch "$APPROVAL_DIR/$HASH"
 
 run_hook "pnpm build"

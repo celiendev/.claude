@@ -42,6 +42,17 @@ if [[ "$FILE_PATH" != /* ]]; then
   FILE_PATH="$PROJECT_DIR/$FILE_PATH"
 fi
 
+# Worktree detection: if FILE_PATH is inside a git worktree (.claude/worktrees/),
+# override PROJECT_DIR to the worktree root so test candidate paths resolve correctly.
+if [[ "$FILE_PATH" == */.claude/worktrees/*/src/* ]] || \
+   [[ "$FILE_PATH" == */.claude/worktrees/*/tests/* ]]; then
+  # Extract worktree root: everything up to and including the agent-* directory
+  WORKTREE_ROOT=$(echo "$FILE_PATH" | sed 's|/\.claude/worktrees/\([^/]*\)/.*|/.claude/worktrees/\1|')
+  if [ -d "$WORKTREE_ROOT" ]; then
+    PROJECT_DIR="$WORKTREE_ROOT"
+  fi
+fi
+
 # Source shared detection library
 source ~/.claude/hooks/lib/detect-project.sh
 source ~/.claude/hooks/lib/approvals.sh 2>/dev/null || true
@@ -78,6 +89,18 @@ esac
 case "$FILE_PATH" in
   */domain/types/*.ts|*/domain/types/index.ts) exit 0 ;;
   */domain/*.types.ts) exit 0 ;;
+  */domain/types.ts) exit 0 ;;
+  */domain/events.ts) exit 0 ;;
+esac
+
+# Skip domain port/interface files (pure TypeScript interfaces, no runtime logic)
+case "$FILE_PATH" in
+  */domain/*.repository.ts|*/domain/*.port.ts|*/domain/*.entity.ts) exit 0 ;;
+esac
+
+# Skip ElectroDB entity definitions (pure schema/configuration, no runtime logic)
+case "$FILE_PATH" in
+  */db/entities/*Entity.ts) exit 0 ;;
 esac
 
 # Skip CSS/style-only files

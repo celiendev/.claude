@@ -17,8 +17,10 @@ mkdir -p "$STATE_DIR"
 SESSION_ID="${CLAUDE_SESSION_ID:-}"
 
 if [ -z "$SESSION_ID" ]; then
-  echo "authorize-stop-hooks: CLAUDE_SESSION_ID not set — Stop hooks will not be gated" >&2
-  exit 1
+  # Non-fatal: warn to stderr but exit 0 so Claude's Bash tool doesn't surface
+  # an error mid-task. The Stop hooks will simply skip without the env var.
+  echo "authorize-stop-hooks: CLAUDE_SESSION_ID not set — Stop hooks will not be gated this turn" >&2
+  exit 0
 fi
 
 SIGNAL_FILE="${STATE_DIR}/.stop-hooks-ok-${SESSION_ID}"

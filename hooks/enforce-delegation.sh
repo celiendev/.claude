@@ -10,15 +10,21 @@ trap 'echo "HOOK CRASH: $0 line $LINENO" >&2; exit 0' ERR
 #   - Counts Read/Grep/Glob calls per session in ~/.claude/hooks/state/main-reads-<session>
 #   - Counts Bash read-style commands (cat/head/tail/grep/rg/find/ls/wc/awk/sed/jq/...)
 #   - Resets counter on Agent/Task tool call (main agent delegated — good signal)
-#   - Soft-blocks at count >= 3 with SOFT_BLOCK_APPROVAL_NEEDED
+#   - Soft-blocks at count >= THRESHOLD (default 5) with SOFT_BLOCK_APPROVAL_NEEDED
 #   - Immediately soft-blocks any Read of a big file (>= 51200 bytes) regardless of count
 #   - Exempts maintenance paths (~/.claude/, MEMORY.md, session-learnings, INVARIANTS.md, etc.)
 #   - Bypasses when sub-agent markers (env var or worktree cwd) are detected
 #
-# Threshold rationale: 1 free read, 2nd triggers. Main agent is an orchestrator,
-# not a worker — one targeted lookup is fine; a 2nd is the sign it should
-# delegate. Big files (>=50KB) are always delegated regardless of count, to protect
-# the 80K token context budget.
+# Threshold rationale: THRESHOLD-1 free reads, THRESHOLD-th triggers (default: 4 free,
+# 5th triggers). Main agent is an orchestrator, not a worker — a few targeted lookups
+# are fine; crossing the threshold is the sign it should delegate. Exempt paths
+# (~/.claude/, MEMORY.md, session-learnings, INVARIANTS.md, .artifacts/, docs/tasks/,
+# sprint specs, CLAUDE.md, AGENTS.md) are not counted. Big files (>=50KB) are always
+# delegated regardless of count, to protect the 80K token context budget.
+#
+# Override: set ENFORCE_DELEGATION_THRESHOLD in env (tests use 2 for speed; production
+# default is 5). Users tuning friction can export a different value from their shell
+# profile or settings.json env block.
 #
 # Exit codes: always 0 (JSON decision goes to stdout per Claude Code hook contract).
 
@@ -213,7 +219,7 @@ fi
 # === INCREMENT COUNTER (atomic, flock-serialized) ===
 CURRENT=$(atomic_increment_counter)
 
-THRESHOLD=5
+THRESHOLD="${ENFORCE_DELEGATION_THRESHOLD:-5}"
 
 if [ "$CURRENT" -lt "$THRESHOLD" ]; then
   log_hook_event "enforce-delegation" "count-$CURRENT" "$TOOL_NAME:$READ_TARGET" 2>/dev/null || true
@@ -236,7 +242,7 @@ if [ -f "$APPROVAL_DIR/$CMD_HASH" ]; then
 fi
 
 # === SOFT-BLOCK ===
-REASON="Main agent has done $CURRENT direct reads this turn (threshold=$THRESHOLD). The main agent is an orchestrator, not a worker — more than 1 direct read must be delegated to an Explore sub-agent (Agent tool, subagent_type=Explore, model=haiku) to keep the 80K-token context budget intact. Approve via AskUserQuestion + approve.sh only if delegation is genuinely not possible."
+REASON="Main agent has done $CURRENT direct reads this turn (threshold=$THRESHOLD). The main agent is an orchestrator, not a worker — more than $((THRESHOLD-1)) direct reads must be delegated to an Explore sub-agent (Agent tool, subagent_type=Explore, model=haiku) to keep the 80K-token context budget intact. Approve via AskUserQuestion + approve.sh only if delegation is genuinely not possible."
 
 # Write hook-specific pending file with read-count context (preserved for approve.sh)
 mkdir -p "$PENDING_DIR" 2>/dev/null || true

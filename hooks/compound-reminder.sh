@@ -24,6 +24,12 @@ source ~/.claude/hooks/lib/stop-guard.sh 2>/dev/null || true
 INPUT=$(cat)
 check_stop_hook_active "$INPUT"
 
+# Only fire when the agent answered with a task-completion summary — not when
+# the last turn ended with AskUserQuestion or when Claude hasn't planted the
+# stop-hooks-ok-<session> authorization marker. This keeps ordinary Q&A and
+# intermediate pauses silent/fast.
+check_completion_authorized "$INPUT"
+
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || echo "")
 # Never write markers with a `-unknown` suffix — they leak across sessions
 # and trip harness-health.sh's stale-marker check.

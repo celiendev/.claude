@@ -39,7 +39,26 @@ check_stop_hook_active() {
 check_completion_authorized() {
   local input="${1:-}"
 
-  # Skip if Claude ended the turn by asking the user a question
+  # Fast path #1: session_id check (cheap).
+  local session_id
+  session_id=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || echo "")
+  if [ -z "$session_id" ] || [ "$session_id" = "null" ]; then
+    exit 0
+  fi
+
+  # Fast path #2: marker file check BEFORE parsing transcript.
+  # If no authorization marker, skip hooks immediately — transcript parse is O(N)
+  # in transcript length and must not run for unauthorized turns.
+  local state_dir="${HOME}/.claude/state"
+  local signal_file="${state_dir}/.stop-hooks-ok-${session_id}"
+  if [ ! -f "$signal_file" ]; then
+    exit 0
+  fi
+
+  # Auth marker present — now check if the turn was actually a completion.
+  # If the last assistant tool_use was AskUserQuestion, the turn is a pause, not
+  # a completion; skip hooks (but do NOT delete the marker — a later real
+  # completion in the same session should still fire the hooks).
   local last_tool
   last_tool=$(printf '%s' "$input" | jq -r '
     (.transcript // []) | map(select(.role == "assistant")) | last
@@ -50,22 +69,7 @@ check_completion_authorized() {
     exit 0
   fi
 
-  local session_id
-  session_id=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || echo "")
-
-  # Fail-closed: if session_id is unknown, skip hooks
-  if [ -z "$session_id" ] || [ "$session_id" = "null" ]; then
-    exit 0
-  fi
-
-  local state_dir="${HOME}/.claude/state"
-  local signal_file="${state_dir}/.stop-hooks-ok-${session_id}"
-
-  if [ ! -f "$signal_file" ]; then
-    # No authorization signal — skip hooks silently
-    exit 0
-  fi
-
-  # Signal present — consume it (one-shot) and allow hooks to proceed
-  rm -f "$signal_file" 2>/dev/null || true
+  # Auth + genuine completion → allow hook to proceed. Do NOT consume the
+  # marker here — consume-auth-marker.sh (the last Stop hook) removes it
+  # after the full chain has run, so every stop hook in the chain sees it.
 }

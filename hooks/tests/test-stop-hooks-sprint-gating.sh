@@ -45,6 +45,7 @@ cleanup() {
         "$STATE_DIR/.claude-compound-warned-$TEST_SESSION" \
         "$STATE_DIR/.claude-verify-warned-$TEST_SESSION" \
         "$STATE_DIR/.claude-compound-done-$TEST_SESSION" \
+        "$STATE_DIR/.stop-hooks-ok-$TEST_SESSION" \
         "$STATE_DIR/.claude-completion-evidence-$TEST_SESSION" 2>/dev/null || true
 }
 
@@ -76,6 +77,16 @@ run_stop_hook() {
   json=$(printf '{"session_id":"%s","stop_hook_active":false}' "$session")
   tmpout=$(mktemp)
   tmperr=$(mktemp)
+
+  # Stop hooks now honor check_completion_authorized — they exit 0 unless Claude
+  # planted the .stop-hooks-ok-<session> marker. Plant it for each test run so
+  # we exercise the real gating logic, not the early-return path. Use
+  # CLAUDE_UNSAFE_BYPASS_STOP_AUTH=1 in a test to opt out (verifies fast-path).
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+  if [ -z "${CLAUDE_UNSAFE_BYPASS_STOP_AUTH:-}" ]; then
+    touch "$STATE_DIR/.stop-hooks-ok-${session}" 2>/dev/null || true
+  fi
+
   printf '%s' "$json" | bash "$hook" >"$tmpout" 2>"$tmperr" || exit_code=$?
   HOOK_OUT=$(cat "$tmpout")
   HOOK_ERR=$(cat "$tmperr")

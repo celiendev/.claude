@@ -111,7 +111,7 @@ match_pattern() {
   return 1
 }
 
-match_pattern '^(pnpm|npm|yarn)[[:space:]]+(build|test|lint|typecheck|check|format|e2e)([[:space:]]|$)' "package manager build/test/lint" ||
+match_pattern '^(pnpm|npm|yarn)[[:space:]]+(build|test|lint|typecheck|check|format|e2e|install|add|remove|update|upgrade)([[:space:]]|$)' "package manager build/test/lint/install" ||
 match_pattern '^(pnpm|npm|yarn)[[:space:]]+run[[:space:]]+(build|test|lint|typecheck|check|format|ci|e2e)([[:space:]]|$)' "package manager run build/test/lint" ||
 match_pattern '^cargo[[:space:]]+(build|test|check|clippy|install|run)([[:space:]]|$)' "cargo build/test/run" ||
 match_pattern '^go[[:space:]]+(build|test|vet|install|run|generate)([[:space:]]|$)' "go build/test/run" ||

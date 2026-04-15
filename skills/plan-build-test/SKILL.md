@@ -8,7 +8,6 @@ description: >
   functionality", or when user provides a feature description to execute. Also
   triggers when user wants to work through pending task files. After local testing
   completes, user manually verifies, then uses /ship-test-ensure to deploy.
-context: fork
 ---
 
 # Plan, Build & Test — Local Development Workflow
@@ -56,11 +55,23 @@ Create the session learnings file at the configured path (from project CLAUDE.md
 
 ### Step 0.1: Check for PRD with progress.json
 
-Search the task file location (from project CLAUDE.md) for `progress.json` files:
+Resolve the search roots in this order — **do not stop at the first miss**; merge results from every step that finds anything, because a project can have plans in multiple places:
 
-1. Find all `progress.json` files in the task directory tree
-2. Read each and check for sprints with `"status": "not_started"` or `"status": "in_progress"`
-3. Also read the session learnings file for any `## Active Task Queue` (legacy format or simple tasks)
+1. **Build Candidate tags** (authoritative handshake from `/plan`):
+   ```bash
+   git tag -l 'build-candidate/*'
+   ```
+   For each tag, read `git show <tag> --stat` to find the PRD directory (spec.md + sprints/ + progress.json). These are plans that `/plan` explicitly declared ready for execution.
+2. **Configured location** — `task-file-location` from project CLAUDE.md `## Execution Config`.
+3. **Convention fallbacks** (when neither tags nor config give results):
+   `docs/tasks/**/progress.json`, `tasks/**/progress.json`, `.tasks/**/progress.json`.
+
+Then for each `progress.json` found:
+
+1. Read each and check for sprints with `"status": "not_started"` or `"status": "in_progress"`
+2. Also read the session learnings file for any `## Active Task Queue` (legacy format or simple tasks)
+
+**If Build Candidate tags exist but the configured `task-file-location` missed them**, note this as a config drift — the project CLAUDE.md `task-file-location` should be updated to the actual PRD directory. Surface this to the user after executing the plan, not before (don't block execution on config cleanup).
 
 ### Step 0.2: Route Decision
 
@@ -85,13 +96,20 @@ Search the task file location (from project CLAUDE.md) for `progress.json` files
 
 Spawn a single **Explore agent** (`subagent_type: "Explore"`, `model: "haiku"`) with this prompt:
 
-> Search all markdown files in the task file directory (from project CLAUDE.md) for unchecked items (`- [ ]`). Also search for `progress.json` files with incomplete sprints. For each file that contains pending items:
+> Search for pending work using this resolution order (merge results from every step that yields anything):
+>
+> a. **Build Candidate tags:** `git tag -l 'build-candidate/*'` — each tag points to a PRD directory. Read `git show <tag> --stat` to find the directory.
+> b. **Configured location:** `task-file-location` from project CLAUDE.md `## Execution Config` (if present).
+> c. **Convention fallbacks:** `docs/tasks/`, `tasks/`, `.tasks/`.
+>
+> Within each root, search all markdown files for unchecked items (`- [ ]`) and all `progress.json` files with incomplete sprints. For each file that contains pending items:
 >
 > 1. Return the full file path
 > 2. Count the number of `- [ ]` (pending) and `- [x]` (completed) items
 > 3. List each pending item's text
 > 4. List ALL files referenced or likely modified by each pending item
 > 5. If a `progress.json` exists in the same directory, note it
+> 6. If the source was a Build Candidate tag, note the tag name too
 >
 > Also check if the user's current request describes a NEW task that doesn't have a task file yet.
 >

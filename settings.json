@@ -34,7 +34,6 @@
     ],
     "deny": []
   },
-  "model": "sonnet",
   "hooks": {
     "PostToolUse": [
       {
@@ -72,7 +71,19 @@
           },
           {
             "type": "command",
+            "command": "~/.claude/hooks/cleanup-worktrees.sh"
+          },
+          {
+            "type": "command",
             "command": "~/.claude/hooks/verify-completion.sh"
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/compound-reminder.sh"
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/consume-auth-marker.sh"
           }
         ]
       }
@@ -183,6 +194,6 @@
     "skill-creator@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {},
-  "effortLevel": "high",
+  "effortLevel": "medium",
   "skipDangerousModePermissionPrompt": true
 }
